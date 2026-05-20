@@ -137,19 +137,6 @@ export async function copyFilesToWorktree(
   }
 }
 
-export async function stageAllChanges(repo: Repository): Promise<boolean> {
-  try {
-    const paths = repo.state.workingTreeChanges.map((c) => c.uri.fsPath);
-    if (paths.length > 0) {
-      await repo.add(paths);
-    }
-    return true;
-  } catch (e: any) {
-    vscode.window.showErrorMessage(`Failed to stage changes: ${e.message}`);
-    return false;
-  }
-}
-
 export async function createWorktree(
   repo: Repository,
   branchName: string,
