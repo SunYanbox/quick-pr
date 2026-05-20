@@ -54,7 +54,7 @@ export interface GitStatus {
 
 export interface ChangedFile {
   path: string;
-  status: 'staged' | 'modified' | 'added' | 'deleted';
+  status: 'staged' | 'modified';
 }
 
 export function getChangedFiles(repo: Repository): ChangedFile[] {
@@ -121,8 +121,13 @@ export async function copyFilesToWorktree(
     }
 
     // Stage all selected files in the worktree repo
+    // Convert original paths to worktree paths for staging
     if (selectedFiles.length > 0) {
-      await repo.add(selectedFiles);
+      const worktreePaths = selectedFiles.map((f) => {
+        const rel = path.relative(originalRoot, f);
+        return path.join(worktreePath, rel);
+      });
+      await repo.add(worktreePaths);
     }
 
     return true;
