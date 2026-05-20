@@ -108,6 +108,10 @@ function getWebviewHtml(
     button.secondary:hover {
       background: var(--vscode-button-secondaryHoverBackground);
     }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
     button.ai {
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
@@ -237,7 +241,11 @@ function getWebviewHtml(
   <script>
     const vscode = acquireVsCodeApi();
 
-    document.getElementById('submitBtn').addEventListener('click', () => validateAndSubmit());
+    document.getElementById('submitBtn').addEventListener('click', () => {
+      document.getElementById('submitBtn').disabled = true;
+      document.getElementById('submitBtn').textContent = '⏳ Creating PR...';
+      validateAndSubmit();
+    });
     document.getElementById('cancelBtn').addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
 
     document.getElementById('settingsBtn').addEventListener('click', () => {
@@ -247,6 +255,8 @@ function getWebviewHtml(
     const aiBtn = document.getElementById('aiBtn');
     if (aiBtn) {
       aiBtn.addEventListener('click', () => {
+        aiBtn.disabled = true;
+        aiBtn.textContent = '⏳ Generating...';
         vscode.postMessage({
           type: 'generateAi',
           commitMsg: document.getElementById('commitMsg').value,
@@ -287,6 +297,13 @@ function getWebviewHtml(
         if (msg.title && titleInput && !titleInput.value) titleInput.value = msg.title;
         const bodyInput = document.getElementById('prBody');
         if (msg.body && bodyInput && !bodyInput.value) bodyInput.value = msg.body;
+      }
+      if (msg.type === 'aiComplete') {
+        const aiBtn = document.getElementById('aiBtn');
+        if (aiBtn) {
+          aiBtn.disabled = false;
+          aiBtn.textContent = '✨ Generate with AI';
+        }
       }
     });
 
@@ -397,6 +414,7 @@ export async function collectInputs(
             .get<boolean>('ai.enabled', false);
 
           if (!isAiEnabled) {
+            panel.webview.postMessage({ type: 'aiComplete' });
             const action = await vscode.window.showWarningMessage(
               'AI generation is not enabled. Enable it in Quick PR settings to use this feature.',
               'Open Settings',
@@ -408,33 +426,46 @@ export async function collectInputs(
             return;
           }
 
-          // Get diff only for selected files — cached at click time
-          const filesDiff = await getFilesDiff(workspaceRoot, msg.selectedFiles || []);
+          await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: 'Quick PR',
+              cancellable: false,
+            },
+            async (progress) => {
+              progress.report({ message: 'AI is generating PR content...' });
 
-          const aiResult = await generatePrContent(
-            msg.commitMsg || '',
-            msg.branchName || '',
-            msg.prTitle || '',
-            msg.prBody || '',
-            filesDiff,
-            projectConfig.prTitleRule,
-            projectConfig.prBodyRule,
-            projectConfig.commitMessageRule,
-            projectConfig.branchNameRule,
-            await getRecentCommits(workspaceRoot),
+              // Get diff only for selected files — cached at click time
+              const filesDiff = await getFilesDiff(workspaceRoot, msg.selectedFiles || []);
+
+              const aiResult = await generatePrContent(
+                msg.commitMsg || '',
+                msg.branchName || '',
+                msg.prTitle || '',
+                msg.prBody || '',
+                filesDiff,
+                projectConfig.prTitleRule,
+                projectConfig.prBodyRule,
+                projectConfig.commitMessageRule,
+                projectConfig.branchNameRule,
+                await getRecentCommits(workspaceRoot),
+              );
+              if (aiResult) {
+                panel.webview.postMessage({
+                  type: 'aiResult',
+                  commitMsg: aiResult.commitMsg,
+                  branchName: aiResult.branchName,
+                  title: aiResult.title,
+                  body: aiResult.body,
+                });
+                panel.webview.postMessage({ type: 'aiComplete' });
+                info('[inputService]', 'AI result sent to webview');
+              } else {
+                panel.webview.postMessage({ type: 'aiComplete' });
+                warn('[inputService]', 'AI generation returned no result');
+              }
+            },
           );
-          if (aiResult) {
-            panel.webview.postMessage({
-              type: 'aiResult',
-              commitMsg: aiResult.commitMsg,
-              branchName: aiResult.branchName,
-              title: aiResult.title,
-              body: aiResult.body,
-            });
-            info('[inputService]', 'AI result sent to webview');
-          } else {
-            warn('[inputService]', 'AI generation returned no result');
-          }
         } else if (msg.type === 'submit') {
           info('[inputService]', 'User submitted PR form', {
             branchName: msg.branchName,

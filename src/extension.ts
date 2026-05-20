@@ -74,82 +74,93 @@ export function activate(context: vscode.ExtensionContext) {
         prTitlePreview: prTitle.slice(0, 80),
       });
 
-      // Step 6: Create worktree
-      const worktreePath = await createWorktree(
-        gitStatus.repo,
-        branchName,
-      );
-      if (!worktreePath) return;
+      // Steps 6-8: Create worktree, copy files, commit & push, create PR
+      const prResult = await vscode.window.withProgress<{ prUrl: string; worktreePath: string } | null>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Quick PR',
+          cancellable: false,
+        },
+        async (progress) => {
+          try {
+            // Step 6: Create worktree
+            progress.report({ message: 'Creating worktree...' });
+            const wtPath = await createWorktree(gitStatus.repo, branchName);
+            if (!wtPath) return null;
 
-      info('[extension]', 'Worktree created', { worktreePath });
+            info('[extension]', 'Worktree created', { worktreePath: wtPath });
 
-      try {
-        // Copy selected files from original repo to worktree
-        const filesCopied = await copyFilesToWorktree(
-          gitStatus.repo.rootUri.fsPath,
-          worktreePath,
-          selectedFiles,
-        );
-        if (!filesCopied) return;
+            // Copy selected files from original repo to worktree
+            progress.report({ message: 'Copying files...' });
+            const filesCopied = await copyFilesToWorktree(
+              gitStatus.repo.rootUri.fsPath,
+              wtPath,
+              selectedFiles,
+            );
+            if (!filesCopied) return null;
 
-        info('[extension]', 'Files copied to worktree', { fileCount: selectedFiles.length });
+            info('[extension]', 'Files copied to worktree', { fileCount: selectedFiles.length });
 
-        const success = await commitAndPush(
-          worktreePath,
-          commitMsg,
-          branchName,
-        );
-        if (!success) return;
+            // Commit and push
+            progress.report({ message: 'Committing and pushing...' });
+            const success = await commitAndPush(wtPath, commitMsg, branchName);
+            if (!success) return null;
 
-        info('[extension]', 'Commit and push successful', { branchName });
+            info('[extension]', 'Commit and push successful', { branchName });
 
-        // Step 8: Create PR
-        const prUrl = await createPr({
-          title: prTitle,
-          body: prBody,
-          base: prBase,
-          head: branchName,
-          worktreePath,
-        });
-        if (!prUrl) return;
+            // Create PR
+            progress.report({ message: 'Creating PR...' });
+            const url = await createPr({
+              title: prTitle,
+              body: prBody,
+              base: prBase,
+              head: branchName,
+              worktreePath: wtPath,
+            });
+            if (!url) return null;
 
-        info('[extension]', 'PR created', { prUrl, base: prBase, head: branchName });
-
-        // Step 9: Open PR URL
-        await openPrUrl(prUrl);
-
-        // Step 10: Cleanup worktree
-        const config = vscode.workspace.getConfiguration('quick-pr');
-        const autoCleanup = config.get<boolean>(
-          'cleanupWorktreeAfterPr',
-          true,
-        );
-
-        if (autoCleanup) {
-          await deleteWorktree(gitStatus.repo.rootUri.fsPath, worktreePath);
-          info('[extension]', 'Worktree auto-cleaned', { worktreePath });
-        } else {
-          const keep = await vscode.window.showQuickPick(
-            ['Keep worktree', 'Delete worktree'],
-            {
-              placeHolder:
-                'PR created. Delete the temporary worktree?',
-            },
-          );
-          if (keep === 'Delete worktree') {
-            await deleteWorktree(gitStatus.repo.rootUri.fsPath, worktreePath);
-            info('[extension]', 'Worktree deleted by user choice', { worktreePath });
+            info('[extension]', 'PR created', { prUrl: url, base: prBase, head: branchName });
+            return { prUrl: url, worktreePath: wtPath };
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            logError('[extension]', 'PR creation flow failed', {
+              branchName,
+              prBase,
+              selectedFilesCount: selectedFiles?.length ?? 0,
+            }, e);
+            vscode.window.showErrorMessage(`PR creation failed: ${msg}`);
+            return null;
           }
+        },
+      );
+
+      if (!prResult) return;
+
+      // Open PR URL
+      await openPrUrl(prResult.prUrl);
+
+      // Cleanup worktree
+      const config = vscode.workspace.getConfiguration('quick-pr');
+      const autoCleanup = config.get<boolean>(
+        'cleanupWorktreeAfterPr',
+        true,
+      );
+
+      if (autoCleanup) {
+        await deleteWorktree(gitStatus.repo.rootUri.fsPath, prResult.worktreePath);
+        info('[extension]', 'Worktree auto-cleaned', { worktreePath: prResult.worktreePath });
+      } else {
+        const keep = await vscode.window.showQuickPick(
+          ['Keep worktree', 'Delete worktree'],
+          {
+            placeHolder:
+              'PR created. Delete the temporary worktree?',
+          },
+        );
+        if (keep === 'Delete worktree') {
+          await deleteWorktree(gitStatus.repo.rootUri.fsPath, prResult.worktreePath);
+          info('[extension]', 'Worktree deleted by user choice', { worktreePath: prResult.worktreePath });
         }
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        logError('[extension]', 'PR creation flow failed', {
-          branchName,
-          prBase,
-          worktreePath,
-          selectedFilesCount: selectedFiles?.length ?? 0,
-        }, e);
-        vscode.window.showErrorMessage(`PR creation failed: ${msg}`);
       }
     },
   );
