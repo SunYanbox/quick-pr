@@ -62,7 +62,13 @@ function safeStringify(value: unknown): string {
 
 function formatError(err: unknown): string {
   if (err instanceof Error) {
-    return `  Stack: ${err.stack || err.message}`;
+    let result = `  Stack: ${err.stack || err.message}`;
+    // Include stderr from child_process.exec failures
+    const stderr = (err as { stderr?: string | Buffer }).stderr;
+    if (stderr) {
+      result += `\n  stderr: ${stderr.toString().trim()}`;
+    }
+    return result;
   }
   return `  Error: ${String(err)}`;
 }

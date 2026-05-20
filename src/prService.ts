@@ -3,7 +3,8 @@ import { exec } from 'child_process';
 import { info, error as logError } from './logger';
 
 export async function checkGhCli(): Promise<boolean> {
-  return new Promise((resolve) => {
+  // Check if gh CLI is installed
+  const installed = await new Promise<boolean>((resolve) => {
     exec('gh --version', (error) => {
       if (error) {
         logError('[prService.checkGhCli]', 'GitHub CLI (gh) is not installed', {
@@ -15,7 +16,30 @@ export async function checkGhCli(): Promise<boolean> {
         );
         resolve(false);
       } else {
-        info('[prService.checkGhCli]', 'GitHub CLI is available');
+        resolve(true);
+      }
+    });
+  });
+
+  if (!installed) return false;
+
+  // Also check if gh is authenticated
+  return new Promise((resolve) => {
+    exec('gh auth status', (authError: Error | null) => {
+      if (authError) {
+        const hint = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+          ? 'Make sure your GH_TOKEN or GITHUB_TOKEN environment variable is valid and has not expired.'
+          : 'Run "gh auth login" to authenticate, or set the GH_TOKEN environment variable.';
+        logError('[prService.checkGhCli]', 'GitHub CLI is not authenticated', {
+          hint,
+          stderr: authError.message,
+        });
+        vscode.window.showErrorMessage(
+          `GitHub CLI (gh) is not authenticated. ${hint}`,
+        );
+        resolve(false);
+      } else {
+        info('[prService.checkGhCli]', 'GitHub CLI is installed and authenticated');
         resolve(true);
       }
     });

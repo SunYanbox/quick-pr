@@ -288,6 +288,17 @@ export async function createWorktree(
   }
 }
 
+/**
+ * Convert an HTTPS remote URL to its SSH equivalent.
+ * e.g. https://github.com/owner/repo.git -> git@github.com:owner/repo.git
+ */
+function httpsToSshUrl(httpsUrl: string): string | null {
+  const match = /^https:\/\/([^\/]+)\/(.+?)(?:\.git)?$/.exec(httpsUrl);
+  if (!match) return null;
+  const [, host, path] = match;
+  return `git@${host}:${path}.git`;
+}
+
 export async function commitAndPush(
   worktreePath: string,
   commitMsg: string,
@@ -303,23 +314,70 @@ export async function commitAndPush(
     // Safety: stage any changes before committing
     await execAsync('git add -A', { cwd: worktreePath, timeout: 30000 });
 
-    // Write commit message to temp file to avoid shell escaping issues
-    const msgFile = path.join(worktreePath, '.quick-pr-commit-msg');
-    fs.writeFileSync(msgFile, commitMsg, 'utf-8');
+    // Check if there are actually changes to commit (handles retry scenarios)
+    const { stdout: statusOut } = await execAsync('git status --porcelain', {
+      cwd: worktreePath,
+      timeout: 10000,
+    });
 
+    if (statusOut.trim()) {
+      // Write commit message to temp file inside worktree (after git add, so not staged)
+      const msgFile = path.join(worktreePath, '.quick-pr-commit-msg');
+      fs.writeFileSync(msgFile, commitMsg, 'utf-8');
+
+      try {
+        await execAsync(`git commit -F "${msgFile}"`, { cwd: worktreePath, timeout: 30000 });
+      } finally {
+        if (fs.existsSync(msgFile)) {
+          fs.unlinkSync(msgFile);
+        }
+      }
+
+      info('[gitService.commitAndPush]', 'Commit successful', { branchName });
+    } else {
+      info('[gitService.commitAndPush]', 'No changes to commit, skipping', { branchName });
+    }
+
+    // Attempt push — if HTTPS fails with connection error, fall back to SSH
     try {
-      await execAsync(`git commit -F "${msgFile}"`, { cwd: worktreePath, timeout: 30000 });
-    } finally {
-      if (fs.existsSync(msgFile)) {
-        fs.unlinkSync(msgFile);
+      await execAsync(`git push -u origin "${branchName}"`, { cwd: worktreePath, timeout: 60000 });
+    } catch (pushError: unknown) {
+      const pushMsg = pushError instanceof Error ? pushError.message : String(pushError);
+      const pushStderr = (pushError as { stderr?: string }).stderr ?? '';
+      const isConnError = /connection was reset|connection refused|could not resolve host|failed to connect|timed? out/i.test(pushMsg) ||
+        /connection was reset|connection refused|could not resolve host|failed to connect|timed? out/i.test(pushStderr);
+
+      if (isConnError) {
+        warn('[gitService.commitAndPush]', 'HTTPS push failed with connection error, trying SSH fallback', {
+          branchName,
+          error: pushMsg,
+        });
+
+        // Get the remote URL to derive SSH URL
+        const { stdout: remoteUrl } = await execAsync('git remote get-url origin', {
+          cwd: worktreePath,
+          timeout: 10000,
+        }).catch(() => ({ stdout: '' }));
+
+        const sshUrl = remoteUrl.trim() && httpsToSshUrl(remoteUrl.trim());
+        if (sshUrl) {
+          info('[gitService.commitAndPush]', 'Retrying push via SSH', { sshUrl });
+          await execAsync(`git push -u "${sshUrl}" "${branchName}"`, {
+            cwd: worktreePath,
+            timeout: 60000,
+          });
+          info('[gitService.commitAndPush]', 'SSH push successful', { branchName });
+        } else {
+          // Not an HTTPS URL or couldn't parse — re-throw original error
+          throw pushError;
+        }
+      } else {
+        // Not a connection error — re-throw
+        throw pushError;
       }
     }
 
-    info('[gitService.commitAndPush]', 'Commit successful', { branchName });
-
-    await execAsync(`git push -u origin "${branchName}"`, { cwd: worktreePath, timeout: 60000 });
     info('[gitService.commitAndPush]', 'Push successful', { branchName });
-
     return true;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
