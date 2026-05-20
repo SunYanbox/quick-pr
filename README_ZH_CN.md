@@ -40,9 +40,9 @@
 - **文件级选择**：精确控制每次 PR 包含的变更
 - **AI 辅助生成**（可选）：基于 OpenAI 兼容 API 自动生成 PR 标题、内容、提交信息和分支名 — 仅填充空字段，保留用户已有输入
 - **SSH 回退**：HTTPS 推送失败时自动尝试 SSH 方式
-- **自定义规则**：通过 `.quick-pr/` 目录配置项目级 PR 标题/内容/提交信息/分支名模板
-- **配置自动初始化**：首次激活时自动创建 `.quick-pr/` 目录及默认配置
-- **完整调试日志**：AI 完整提示词和原始回复均记录到 `.quick-pr/log.log`，方便排查问题
+- **自定义规则**：通过 `.quick-pr-studio/` 目录配置项目级 PR 标题/内容/提交信息/分支名模板
+- **配置自动初始化**：首次激活时自动创建 `.quick-pr-studio/` 目录及默认配置
+- **完整调试日志**：AI 完整提示词和原始回复均记录到 `.quick-pr-studio/log.log`，方便排查问题
 - **加载状态提示**：点击按钮后自动禁用并显示进度文字，同时 VS Code 通知区域实时显示当前操作步骤
 
 ## 配置项
@@ -58,7 +58,7 @@
 
 ### 项目级配置
 
-在项目根目录放置 `.quick-pr/settings.json`：
+在项目根目录放置 `.quick-pr-studio/settings.json`：
 
 ```json
 {
@@ -67,10 +67,10 @@
 ```
 
 可选规则文件：
-- `.quick-pr/PR title rule.md` — 自定义标题格式规则
-- `.quick-pr/PR body rule.md` — 自定义内容模板规则
-- `.quick-pr/commit message rule.md` — 自定义提交信息格式规则
-- `.quick-pr/branch name rule.md` — 自定义分支命名规则
+- `.quick-pr-studio/PR title rule.md` — 自定义标题格式规则
+- `.quick-pr-studio/PR body rule.md` — 自定义内容模板规则
+- `.quick-pr-studio/commit message rule.md` — 自定义提交信息格式规则
+- `.quick-pr-studio/branch name rule.md` — 自定义分支命名规则
 
 ## 开发指南
 
