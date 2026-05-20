@@ -168,6 +168,7 @@ function getWebviewHtml(
       </label>
       `).join('')}
     </div>
+    <div class="error" id="fileError">Please select at least one file</div>
     <div class="hint">Uncheck files you don't want to include in this PR</div>
   </div>
 
@@ -293,8 +294,9 @@ function getWebviewHtml(
         valid = false;
       }
       if (selectedFiles.length === 0) {
+        document.getElementById('fileError').style.display = 'block';
         document.querySelector('.file-list')?.scrollIntoView({ behavior: 'smooth' });
-        return;
+        valid = false;
       }
 
       if (valid) {
