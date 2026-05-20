@@ -11,6 +11,7 @@ import {
   openPrUrl,
 } from './gitService';
 import { checkGhCli, createPr } from './prService';
+import { initLogger, info, error as logError } from './logger';
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Quick PR extension activated');
@@ -25,6 +26,9 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      initLogger(workspaceRoot);
+      info('[extension]', 'Starting PR creation flow', { workspaceRoot });
+
       // Step 2: Check gh CLI
       const ghAvailable = await checkGhCli();
       if (!ghAvailable) return;
@@ -33,6 +37,8 @@ export function activate(context: vscode.ExtensionContext) {
       const gitStatus = getCurrentRepo();
       if (!gitStatus) return;
 
+      info('[extension]', 'Git status retrieved', { currentBranch: gitStatus.currentBranch });
+
       // Step 4: Get changed files for user selection
       const changedFiles = getChangedFiles(gitStatus.repo);
       if (changedFiles.length === 0) {
@@ -40,11 +46,24 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      info('[extension]', 'Changed files detected', { fileCount: changedFiles.length });
+
       // Step 5: Collect inputs with file selection
       const inputs = await collectInputs(workspaceRoot, changedFiles);
-      if (!inputs) return; // user cancelled
+      if (!inputs) {
+        info('[extension]', 'User cancelled input collection');
+        return; // user cancelled
+      }
 
       const { commitMsg, branchName, prTitle, prBody, prBase, selectedFiles } = inputs;
+
+      info('[extension]', 'Inputs collected', {
+        branchName,
+        prBase,
+        selectedFilesCount: selectedFiles.length,
+        commitMsgPreview: commitMsg.slice(0, 80),
+        prTitlePreview: prTitle.slice(0, 80),
+      });
 
       // Step 6: Create worktree
       const worktreePath = await createWorktree(
@@ -54,11 +73,14 @@ export function activate(context: vscode.ExtensionContext) {
       );
       if (!worktreePath) return;
 
+      info('[extension]', 'Worktree created', { worktreePath });
+
       try {
         // Step 7: Copy selected files to worktree and commit
         const worktreeRepo = await findWorktreeRepo(worktreePath);
         if (!worktreeRepo) {
           vscode.window.showErrorMessage('Could not find worktree repository');
+          logError('[extension]', 'Worktree repo not found after creation', { worktreePath });
           return;
         }
 
@@ -71,12 +93,16 @@ export function activate(context: vscode.ExtensionContext) {
         );
         if (!filesCopied) return;
 
+        info('[extension]', 'Files copied to worktree', { fileCount: selectedFiles.length });
+
         const success = await commitAndPush(
           worktreeRepo,
           commitMsg,
           branchName,
         );
         if (!success) return;
+
+        info('[extension]', 'Commit and push successful', { branchName });
 
         // Step 8: Create PR
         const prUrl = await createPr({
@@ -87,6 +113,8 @@ export function activate(context: vscode.ExtensionContext) {
           worktreePath,
         });
         if (!prUrl) return;
+
+        info('[extension]', 'PR created', { prUrl, base: prBase, head: branchName });
 
         // Step 9: Open PR URL
         await openPrUrl(prUrl);
@@ -100,6 +128,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (autoCleanup) {
           await deleteWorktree(gitStatus.repo, worktreePath);
+          info('[extension]', 'Worktree auto-cleaned', { worktreePath });
         } else {
           const keep = await vscode.window.showQuickPick(
             ['Keep worktree', 'Delete worktree'],
@@ -110,10 +139,18 @@ export function activate(context: vscode.ExtensionContext) {
           );
           if (keep === 'Delete worktree') {
             await deleteWorktree(gitStatus.repo, worktreePath);
+            info('[extension]', 'Worktree deleted by user choice', { worktreePath });
           }
         }
-      } catch (e: any) {
-        vscode.window.showErrorMessage(`Error: ${e.message}`);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logError('[extension]', 'PR creation flow failed', {
+          branchName,
+          prBase,
+          worktreePath,
+          selectedFilesCount: selectedFiles?.length ?? 0,
+        }, e);
+        vscode.window.showErrorMessage(`PR creation failed: ${msg}`);
       }
     },
   );

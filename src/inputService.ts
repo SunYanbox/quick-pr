@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { generatePrContent } from './aiService';
 import { loadProjectConfig } from './projectConfig';
+import { info, warn, error as logError } from './logger';
 
 export interface CollectedInputs {
   commitMsg: string;
@@ -145,6 +146,8 @@ function getWebviewHtml(
     }
     .file-item input[type="checkbox"] {
       flex-shrink: 0;
+      width: 16px;
+      height: 16px;
     }
     .file-path {
       flex: 1;
@@ -351,44 +354,72 @@ export async function collectInputs(
     panel.webview.html = getWebviewHtml(projectConfig, aiEnabled, changedFiles, workspaceRoot);
 
     let resolved = false;
+    let panelDisposed = false;
 
     const disposable = panel.webview.onDidReceiveMessage(async (msg) => {
-      if (resolved) return;
-      if (msg.type === 'generateAi') {
-        const aiResult = await generatePrContent(
-          msg.commitMsg,
-          msg.branchName,
-          projectConfig.prTitleRule,
-          projectConfig.prBodyRule,
-        );
-        if (aiResult) {
-          panel.webview.postMessage({
-            type: 'aiResult',
-            title: aiResult.title,
-            body: aiResult.body,
+      if (resolved || panelDisposed) return;
+      try {
+        if (msg.type === 'generateAi') {
+          info('[inputService]', 'AI generation requested', {
+            commitMsgPreview: (msg.commitMsg || '').slice(0, 80),
+            branchName: msg.branchName,
           });
+          const aiResult = await generatePrContent(
+            msg.commitMsg,
+            msg.branchName,
+            projectConfig.prTitleRule,
+            projectConfig.prBodyRule,
+          );
+          if (aiResult) {
+            panel.webview.postMessage({
+              type: 'aiResult',
+              title: aiResult.title,
+              body: aiResult.body,
+            });
+            info('[inputService]', 'AI result sent to webview');
+          } else {
+            warn('[inputService]', 'AI generation returned no result');
+          }
+        } else if (msg.type === 'submit') {
+          info('[inputService]', 'User submitted PR form', {
+            branchName: msg.branchName,
+            prBase: msg.prBase,
+            selectedFilesCount: msg.selectedFiles?.length ?? 0,
+          });
+          resolved = true;
+          panel.dispose();
+          resolve({
+            commitMsg: msg.commitMsg,
+            branchName: msg.branchName,
+            prTitle: msg.prTitle,
+            prBody: msg.prBody,
+            prBase: msg.prBase,
+            selectedFiles: msg.selectedFiles,
+          });
+        } else if (msg.type === 'cancel') {
+          info('[inputService]', 'User cancelled PR creation');
+          resolved = true;
+          panel.dispose();
+          resolve(null);
+        } else {
+          warn('[inputService]', 'Unknown message type from webview', { type: msg.type });
         }
-      } else if (msg.type === 'submit') {
-        resolved = true;
-        panel.dispose();
-        resolve({
-          commitMsg: msg.commitMsg,
-          branchName: msg.branchName,
-          prTitle: msg.prTitle,
-          prBody: msg.prBody,
-          prBase: msg.prBase,
-          selectedFiles: msg.selectedFiles,
-        });
-      } else if (msg.type === 'cancel') {
-        resolved = true;
-        panel.dispose();
-        resolve(null);
+      } catch (e: unknown) {
+        const msgStr = e instanceof Error ? e.message : String(e);
+        logError('[inputService]', 'Error handling webview message', {
+          messageType: msg.type,
+        }, e);
+        vscode.window.showErrorMessage(`An error occurred: ${msgStr}`);
       }
     });
 
     panel.onDidDispose(() => {
       disposable.dispose();
-      if (!resolved) resolve(null);
+      panelDisposed = true;
+      if (!resolved) {
+        info('[inputService]', 'Panel disposed without resolution');
+        resolve(null);
+      }
     });
   });
 }
