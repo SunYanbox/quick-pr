@@ -3,7 +3,7 @@ import * as path from 'path';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
-const LOG_DIR = '.quick-pr';
+const LOG_DIR = '.quick-pr-studio';
 const LOG_FILE = 'log.log';
 
 let _workspaceRoot: string | null = null;

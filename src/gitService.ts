@@ -192,7 +192,7 @@ export async function createWorktree(
     return null;
   }
 
-  const worktreeDir = path.join(rootPath, '.quick-pr', 'worktrees');
+  const worktreeDir = path.join(rootPath, '.quick-pr-studio', 'worktrees');
   const worktreePath = path.join(worktreeDir, safeName);
 
   const commitish = repo.state.HEAD?.name;
@@ -343,7 +343,7 @@ export async function commitAndPush(
 
     if (statusOut.trim()) {
       // Write commit message to temp file inside worktree (after git add, so not staged)
-      const msgFile = path.join(worktreePath, '.quick-pr-commit-msg');
+      const msgFile = path.join(worktreePath, '.quick-pr-studio-commit-msg');
       fs.writeFileSync(msgFile, commitMsg, 'utf-8');
 
       try {
