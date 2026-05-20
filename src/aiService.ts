@@ -22,6 +22,9 @@ function getConfig() {
 function buildUserPrompt(
   commitMsg: string,
   branchName: string,
+  prTitle: string,
+  prBody: string,
+  filesDiff: string,
   prTitleRule: string,
   prBodyRule: string,
   commitMessageRule: string,
@@ -31,8 +34,11 @@ function buildUserPrompt(
   const parts: string[] = [
     'Generate a pull request title, description, commit message, and branch name for the following changes:',
     '',
-    `Current commit hint: ${commitMsg}`,
-    `Current branch hint: ${branchName}`,
+    'Existing field values (only fill fields that are empty or need improvement; reuse existing values if they are already good):',
+    `- Commit message: "${commitMsg || '(empty)'}"`,
+    `- Branch name: "${branchName || '(empty)'}"`,
+    `- PR title: "${prTitle || '(empty)'}"`,
+    `- PR body: "${prBody || '(empty)'}"`,
   ];
 
   if (recentCommits.length > 0) {
@@ -63,6 +69,11 @@ function buildUserPrompt(
     parts.push('Body rules:');
     parts.push(prBodyRule);
   }
+  if (filesDiff) {
+    parts.push('');
+    parts.push('Diff of selected changes:');
+    parts.push(filesDiff);
+  }
   parts.push('');
   parts.push('Respond ONLY with a JSON object: { "commitMsg": "...", "branchName": "...", "title": "...", "body": "..." }');
   return parts.join('\n');
@@ -71,6 +82,9 @@ function buildUserPrompt(
 export async function generatePrContent(
   commitMsg: string,
   branchName: string,
+  prTitle: string,
+  prBody: string,
+  filesDiff: string,
   prTitleRule: string,
   prBodyRule: string,
   commitMessageRule: string = '',
@@ -122,7 +136,7 @@ export async function generatePrContent(
           { role: 'system', content: promptTemplate },
           {
             role: 'user',
-            content: buildUserPrompt(commitMsg, branchName, prTitleRule, prBodyRule, commitMessageRule, branchNameRule, recentCommits),
+            content: buildUserPrompt(commitMsg, branchName, prTitle, prBody, filesDiff, prTitleRule, prBodyRule, commitMessageRule, branchNameRule, recentCommits),
           },
         ],
         temperature: 0.7,

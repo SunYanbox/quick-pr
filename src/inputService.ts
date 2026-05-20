@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { generatePrContent } from './aiService';
 import { loadProjectConfig } from './projectConfig';
-import { getRecentCommits } from './gitService';
+import { getRecentCommits, getFilesDiff } from './gitService';
 import { info, warn, error as logError } from './logger';
 
 export interface CollectedInputs {
@@ -251,6 +251,9 @@ function getWebviewHtml(
           type: 'generateAi',
           commitMsg: document.getElementById('commitMsg').value,
           branchName: document.getElementById('branchName').value,
+          prTitle: document.getElementById('prTitle').value,
+          prBody: document.getElementById('prBody').value,
+          selectedFiles: getSelectedFiles(),
         });
       });
     }
@@ -272,14 +275,18 @@ function getWebviewHtml(
       });
     });
 
-    // Listen for AI-generated content
+    // Listen for AI-generated content — only fill EMPTY fields to preserve user input
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (msg.type === 'aiResult') {
-        if (msg.commitMsg) document.getElementById('commitMsg').value = msg.commitMsg;
-        if (msg.branchName) document.getElementById('branchName').value = msg.branchName;
-        if (msg.title) document.getElementById('prTitle').value = msg.title;
-        if (msg.body) document.getElementById('prBody').value = msg.body;
+        const commitInput = document.getElementById('commitMsg');
+        if (msg.commitMsg && commitInput && !commitInput.value) commitInput.value = msg.commitMsg;
+        const branchInput = document.getElementById('branchName');
+        if (msg.branchName && branchInput && !branchInput.value) branchInput.value = msg.branchName;
+        const titleInput = document.getElementById('prTitle');
+        if (msg.title && titleInput && !titleInput.value) titleInput.value = msg.title;
+        const bodyInput = document.getElementById('prBody');
+        if (msg.body && bodyInput && !bodyInput.value) bodyInput.value = msg.body;
       }
     });
 
@@ -364,6 +371,7 @@ export async function collectInputs(
       {
         enableScripts: true,
         localResourceRoots: [],
+        retainContextWhenHidden: true,
       },
     );
 
@@ -381,6 +389,7 @@ export async function collectInputs(
           info('[inputService]', 'AI generation requested', {
             commitMsgPreview: (msg.commitMsg || '').slice(0, 80),
             branchName: msg.branchName,
+            selectedFilesCount: msg.selectedFiles?.length ?? 0,
           });
 
           const isAiEnabled = vscode.workspace
@@ -399,9 +408,15 @@ export async function collectInputs(
             return;
           }
 
+          // Get diff only for selected files — cached at click time
+          const filesDiff = await getFilesDiff(workspaceRoot, msg.selectedFiles || []);
+
           const aiResult = await generatePrContent(
-            msg.commitMsg,
-            msg.branchName,
+            msg.commitMsg || '',
+            msg.branchName || '',
+            msg.prTitle || '',
+            msg.prBody || '',
+            filesDiff,
             projectConfig.prTitleRule,
             projectConfig.prBodyRule,
             projectConfig.commitMessageRule,

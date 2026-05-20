@@ -481,6 +481,33 @@ export async function openPrUrl(url: string): Promise<void> {
   }
 }
 
+export async function getFilesDiff(
+  workspaceRoot: string,
+  selectedFiles: string[],
+  maxLength: number = 8000,
+): Promise<string> {
+  if (selectedFiles.length === 0) return '';
+
+  try {
+    const relativePaths = selectedFiles.map(f => path.relative(workspaceRoot, f));
+    const { stdout } = await execAsync(
+      `git diff HEAD -- ${relativePaths.map(p => `"${p}"`).join(' ')}`,
+      { cwd: workspaceRoot, timeout: 30000, maxBuffer: 1024 * 1024 },
+    );
+
+    if (!stdout.trim()) return '';
+    if (stdout.length > maxLength) {
+      return stdout.slice(0, maxLength) + '\n...(diff truncated)';
+    }
+    return stdout;
+  } catch (e: unknown) {
+    warn('[gitService.getFilesDiff]', 'Failed to get file diff', {
+      fileCount: selectedFiles.length,
+    });
+    return '';
+  }
+}
+
 export async function getRecentCommits(workspaceRoot: string, count: number = 5): Promise<string[]> {
   try {
     const { stdout } = await execAsync(
