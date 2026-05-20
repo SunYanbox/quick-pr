@@ -232,7 +232,7 @@ function getWebviewHtml(
   </div>
 
   <div class="button-row">
-    <button class="settings" id="settingsBtn" title="Open Quick PR settings">⚙ Settings</button>
+    <button class="settings" id="settingsBtn" title="Open Quick PR Studio settings">⚙ Settings</button>
     <button class="ai" id="aiBtn">✨ Generate with AI</button>
     <button class="secondary" id="cancelBtn">Cancel</button>
     <button class="primary" id="submitBtn">Create PR</button>
@@ -383,7 +383,7 @@ export async function collectInputs(
   return new Promise<CollectedInputs | null>((resolve) => {
     const panel = vscode.window.createWebviewPanel(
       'quickPrInput',
-      'Quick PR',
+      'Quick PR Studio',
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: true },
       {
         enableScripts: true,
@@ -401,7 +401,7 @@ export async function collectInputs(
       if (resolved || panelDisposed) return;
       try {
         if (msg.type === 'openSettings') {
-          vscode.commands.executeCommand('workbench.action.openSettings', 'quick-pr');
+          vscode.commands.executeCommand('workbench.action.openSettings', 'quick-pr-studio');
         } else if (msg.type === 'generateAi') {
           info('[inputService]', 'AI generation requested', {
             commitMsgPreview: (msg.commitMsg || '').slice(0, 80),
@@ -410,18 +410,18 @@ export async function collectInputs(
           });
 
           const isAiEnabled = vscode.workspace
-            .getConfiguration('quick-pr')
+            .getConfiguration('quick-pr-studio')
             .get<boolean>('ai.enabled', false);
 
           if (!isAiEnabled) {
             panel.webview.postMessage({ type: 'aiComplete' });
             const action = await vscode.window.showWarningMessage(
-              'AI generation is not enabled. Enable it in Quick PR settings to use this feature.',
+              'AI generation is not enabled. Enable it in Quick PR Studio settings to use this feature.',
               'Open Settings',
               'Cancel',
             );
             if (action === 'Open Settings') {
-              vscode.commands.executeCommand('workbench.action.openSettings', 'quick-pr.ai');
+              vscode.commands.executeCommand('workbench.action.openSettings', 'quick-pr-studio.ai');
             }
             return;
           }

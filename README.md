@@ -1,4 +1,4 @@
-# Quick PR
+# Quick PR Studio
 
 A VS Code extension that streamlines creating GitHub Pull Requests using a **worktree-based workflow** — no more context switching between your editor and terminal.
 
@@ -30,7 +30,7 @@ A VS Code extension that streamlines creating GitHub Pull Requests using a **wor
 ## Usage
 
 1. Make changes in your repository and stage them in VS Code's Source Control panel
-2. Run command **"Quick PR: Create Pull Request"** from the Command Palette (`Ctrl+Shift+P`)
+2. Run command **"Quick PR Studio: Create Pull Request"** from the Command Palette (`Ctrl+Shift+P`)
 3. Select the files you want to include
 4. Fill in the form and click **Create PR**
 
@@ -49,12 +49,12 @@ A VS Code extension that streamlines creating GitHub Pull Requests using a **wor
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `quick-pr.ai.enabled` | `false` | Enable AI generation for PR title and body |
-| `quick-pr.ai.apiKey` | `""` | API key for OpenAI-compatible API |
-| `quick-pr.ai.baseUrl` | `""` | Base URL for OpenAI-compatible API |
-| `quick-pr.ai.model` | `gpt-4o-mini` | Model name for OpenAI-compatible API |
-| `quick-pr.ai.promptTemplate` | *(built-in)* | System prompt for AI generation |
-| `quick-pr.cleanupWorktreeAfterPr` | `true` | Delete worktree automatically after PR creation |
+| `quick-pr-studio.ai.enabled` | `false` | Enable AI generation for PR title and body |
+| `quick-pr-studio.ai.apiKey` | `""` | API key for OpenAI-compatible API |
+| `quick-pr-studio.ai.baseUrl` | `""` | Base URL for OpenAI-compatible API |
+| `quick-pr-studio.ai.model` | `gpt-4o-mini` | Model name for OpenAI-compatible API |
+| `quick-pr-studio.ai.promptTemplate` | *(built-in)* | System prompt for AI generation |
+| `quick-pr-studio.cleanupWorktreeAfterPr` | `true` | Delete worktree automatically after PR creation |
 
 ### Project-level Configuration
 
@@ -86,7 +86,7 @@ code .
 # 3. Press F5 to launch the Extension Development Host
 ```
 
-The extension activates on the command `quick-pr.createPr`.
+The extension activates on the command `quick-pr-studio.createPr`.
 
 ### Build
 

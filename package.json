@@ -1,54 +1,54 @@
 {
-  "name": "quick-pr",
-  "displayName": "Quick PR",
+  "name": "quick-pr-studio",
+  "displayName": "Quick PR Studio",
   "description": "Create GitHub PRs quickly from VS Code using worktree workflow",
   "version": "0.0.1",
   "publisher": "Suntion",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SunYanbox/quick-pr"
+    "url": "https://github.com/SunYanbox/quick-pr-studio"
   },
   "license": "MIT",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
-  "activationEvents": ["onCommand:quick-pr.createPr"],
+  "activationEvents": ["onCommand:quick-pr-studio.createPr"],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "quick-pr.createPr",
-        "title": "Quick PR: Create Pull Request"
+        "command": "quick-pr-studio.createPr",
+        "title": "Quick PR Studio: Create Pull Request"
       }
     ],
     "configuration": {
-      "title": "Quick PR",
+      "title": "Quick PR Studio",
       "properties": {
-        "quick-pr.ai.enabled": {
+        "quick-pr-studio.ai.enabled": {
           "type": "boolean",
           "default": false,
           "description": "Enable AI generation for PR title and body"
         },
-        "quick-pr.ai.apiKey": {
+        "quick-pr-studio.ai.apiKey": {
           "type": "string",
           "default": "",
           "description": "API key for OpenAI-compatible API"
         },
-        "quick-pr.ai.baseUrl": {
+        "quick-pr-studio.ai.baseUrl": {
           "type": "string",
           "default": "",
           "description": "Base URL for OpenAI-compatible API (e.g. https://api.openai.com/v1)"
         },
-        "quick-pr.ai.model": {
+        "quick-pr-studio.ai.model": {
           "type": "string",
           "default": "gpt-4o-mini",
           "description": "Model name for OpenAI-compatible API (e.g. gpt-4o-mini, deepseek-v4-flash)"
         },
-        "quick-pr.ai.promptTemplate": {
+        "quick-pr-studio.ai.promptTemplate": {
           "type": "string",
           "default": "Generate a professional pull request title, description, commit message, and branch name. Return your response as JSON with \"commitMsg\", \"branchName\", \"title\", and \"body\" fields.",
           "description": "System prompt template for AI PR generation"
         },
-        "quick-pr.cleanupWorktreeAfterPr": {
+        "quick-pr-studio.cleanupWorktreeAfterPr": {
           "type": "boolean",
           "default": true,
           "description": "Whether to delete worktree after PR is created"

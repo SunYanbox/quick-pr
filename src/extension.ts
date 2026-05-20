@@ -14,7 +14,7 @@ import { initLogger, info, error as logError } from './logger';
 import { initProjectConfig } from './projectConfig';
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log('Quick PR extension activated');
+  console.log('Quick PR Studio extension activated');
 
   // Initialize project config files on activation
   const workspaceRoot =
@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   const disposable = vscode.commands.registerCommand(
-    'quick-pr.createPr',
+    'quick-pr-studio.createPr',
     async () => {
       const workspaceRoot =
         vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
@@ -78,7 +78,7 @@ export function activate(context: vscode.ExtensionContext) {
       const prResult = await vscode.window.withProgress<{ prUrl: string; worktreePath: string } | null>(
         {
           location: vscode.ProgressLocation.Notification,
-          title: 'Quick PR',
+          title: 'Quick PR Studio',
           cancellable: false,
         },
         async (progress) => {
@@ -140,7 +140,7 @@ export function activate(context: vscode.ExtensionContext) {
       await openPrUrl(prResult.prUrl);
 
       // Cleanup worktree
-      const config = vscode.workspace.getConfiguration('quick-pr');
+      const config = vscode.workspace.getConfiguration('quick-pr-studio');
       const autoCleanup = config.get<boolean>(
         'cleanupWorktreeAfterPr',
         true,

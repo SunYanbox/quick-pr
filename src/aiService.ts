@@ -9,7 +9,7 @@ interface AiResponse {
 }
 
 function getConfig() {
-  const config = vscode.workspace.getConfiguration('quick-pr');
+  const config = vscode.workspace.getConfiguration('quick-pr-studio');
   return {
     enabled: config.get<boolean>('ai.enabled', false),
     apiKey: config.get<string>('ai.apiKey', ''),
@@ -108,7 +108,7 @@ export async function generatePrContent(
       baseUrl: baseUrl || 'default (api.openai.com)',
     });
     vscode.window.showWarningMessage(
-      'AI generation is enabled but no API key is configured (quick-pr.ai.apiKey)',
+      'AI generation is enabled but no API key is configured (quick-pr-studio.ai.apiKey)',
     );
     return null;
   }

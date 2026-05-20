@@ -1,4 +1,4 @@
-# Quick PR — 快速创建 GitHub Pull Request
+# Quick PR Studio — 快速创建 GitHub Pull Request
 
 一款 VS Code 扩展，基于 **worktree（临时工作目录）** 工作流，帮助你在编辑器内快速创建 GitHub Pull Request，无需切换到终端。
 
@@ -30,7 +30,7 @@
 ## 使用方法
 
 1. 在仓库中修改代码，并在 VS Code 源码管理中暂存文件
-2. 从命令面板 (`Ctrl+Shift+P`) 执行 **"Quick PR: Create Pull Request"**
+2. 从命令面板 (`Ctrl+Shift+P`) 执行 **"Quick PR Studio: Create Pull Request"**
 3. 选择要包含的文件
 4. 填写表单，点击 **Create PR**
 
@@ -49,12 +49,12 @@
 
 | 设置 | 默认值 | 说明 |
 |------|--------|------|
-| `quick-pr.ai.enabled` | `false` | 启用 AI 生成 PR 标题和内容 |
-| `quick-pr.ai.apiKey` | `""` | OpenAI 兼容 API 的密钥 |
-| `quick-pr.ai.baseUrl` | `""` | OpenAI 兼容 API 的地址 |
-| `quick-pr.ai.model` | `gpt-4o-mini` | OpenAI 兼容 API 的模型名称 |
-| `quick-pr.ai.promptTemplate` | (内置) | AI 生成的系统提示词 |
-| `quick-pr.cleanupWorktreeAfterPr` | `true` | 创建 PR 后自动删除 worktree |
+| `quick-pr-studio.ai.enabled` | `false` | 启用 AI 生成 PR 标题和内容 |
+| `quick-pr-studio.ai.apiKey` | `""` | OpenAI 兼容 API 的密钥 |
+| `quick-pr-studio.ai.baseUrl` | `""` | OpenAI 兼容 API 的地址 |
+| `quick-pr-studio.ai.model` | `gpt-4o-mini` | OpenAI 兼容 API 的模型名称 |
+| `quick-pr-studio.ai.promptTemplate` | (内置) | AI 生成的系统提示词 |
+| `quick-pr-studio.cleanupWorktreeAfterPr` | `true` | 创建 PR 后自动删除 worktree |
 
 ### 项目级配置
 
@@ -86,7 +86,7 @@ code .
 # 3. 按 F5 启动「扩展开发主机」实例
 ```
 
-扩展通过命令 `quick-pr.createPr` 激活。
+扩展通过命令 `quick-pr-studio.createPr` 激活。
 
 ### 构建
 
