@@ -114,7 +114,6 @@ export async function copyFilesToWorktree(
   originalRoot: string,
   worktreePath: string,
   selectedFiles: string[],
-  repo: Repository,
 ): Promise<boolean> {
   info('[gitService.copyFilesToWorktree]', 'Copying files to worktree', {
     originalRoot,
@@ -141,14 +140,9 @@ export async function copyFilesToWorktree(
       }
     }
 
-    // Stage all selected files in the worktree repo
-    // Convert original paths to worktree paths for staging
+    // Stage all files in the worktree using native git
     if (selectedFiles.length > 0) {
-      const worktreePaths = selectedFiles.map((f) => {
-        const rel = path.relative(originalRoot, f);
-        return path.join(worktreePath, rel);
-      });
-      await repo.add(worktreePaths);
+      await execAsync('git add -A', { cwd: worktreePath, timeout: 30000 });
     }
 
     info('[gitService.copyFilesToWorktree]', 'Files copied and staged successfully');
@@ -165,10 +159,18 @@ export async function copyFilesToWorktree(
   }
 }
 
+async function branchExists(branchName: string, cwd: string): Promise<boolean> {
+  try {
+    await execAsync(`git rev-parse --verify "${branchName}"`, { cwd });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function createWorktree(
   repo: Repository,
   branchName: string,
-  rootUri: vscode.Uri,
 ): Promise<string | null> {
   if (!branchName || !branchName.trim()) {
     logError('[gitService.createWorktree]', 'Branch name is empty');
@@ -229,11 +231,39 @@ export async function createWorktree(
         branchName,
       });
 
-      // Fallback: use native git command
+      // Clean up stale worktree directory and git registration from previous failed runs
+      if (fs.existsSync(worktreePath)) {
+        info('[gitService.createWorktree]', 'Removing stale worktree directory', { worktreePath });
+        fs.rmSync(worktreePath, { recursive: true, force: true });
+      }
+      // Prune stale worktree registrations in .git/worktrees/
+      await execAsync('git worktree prune', { cwd: rootPath, timeout: 10000 });
+      info('[gitService.createWorktree]', 'Stale worktree registrations pruned');
+
+      const branchAlreadyExists = await branchExists(branchName, rootPath);
+      if (branchAlreadyExists) {
+        info('[gitService.createWorktree]', 'Branch already exists, adding worktree without -b', { branchName });
+        const command = `git worktree add "${worktreePath}" "${branchName}"`;
+        info('[gitService.createWorktree]', 'Executing native git command', { command });
+
+        const { stderr } = await execAsync(command, {
+          cwd: rootPath,
+          timeout: 30000,
+        });
+
+        if (stderr && !stderr.includes('Preparing worktree')) {
+          warn('[gitService.createWorktree]', 'Git worktree stderr', { stderr });
+        }
+
+        info('[gitService.createWorktree]', 'Worktree created via native git (existing branch)', { worktreePath });
+        return worktreePath;
+      }
+
+      // Branch doesn't exist — normal flow
       const command = `git worktree add -b "${branchName}" "${worktreePath}" "${commitish}"`;
       info('[gitService.createWorktree]', 'Executing native git command', { command });
 
-      const { stdout, stderr } = await execAsync(command, {
+      const { stderr } = await execAsync(command, {
         cwd: rootPath,
         timeout: 30000,
       });
@@ -258,54 +288,43 @@ export async function createWorktree(
   }
 }
 
-export async function findWorktreeRepo(
-  worktreePath: string,
-): Promise<Repository | null> {
-  info('[gitService.findWorktreeRepo]', 'Looking for worktree repo', { worktreePath });
-
-  const api = getGitApi();
-  if (!api) {
-    logError('[gitService.findWorktreeRepo]', 'Git API not available', { worktreePath });
-    return null;
-  }
-
-  const found = api.repositories.find(
-    (r) => r.rootUri.fsPath === worktreePath && r.kind === 'worktree',
-  ) || null;
-
-  if (found) {
-    info('[gitService.findWorktreeRepo]', 'Worktree repo found', { worktreePath });
-  } else {
-    logError('[gitService.findWorktreeRepo]', 'Worktree repo not found in API repositories', {
-      worktreePath,
-      availableRepos: api.repositories.map((r) => ({ path: r.rootUri.fsPath, kind: r.kind })),
-    });
-  }
-
-  return found;
-}
-
 export async function commitAndPush(
-  repo: Repository,
+  worktreePath: string,
   commitMsg: string,
   branchName: string,
 ): Promise<boolean> {
   info('[gitService.commitAndPush]', 'Starting commit and push', {
+    worktreePath,
     branchName,
     commitMsgPreview: commitMsg.slice(0, 80),
   });
 
   try {
-    await repo.commit(commitMsg);
+    // Safety: stage any changes before committing
+    await execAsync('git add -A', { cwd: worktreePath, timeout: 30000 });
+
+    // Write commit message to temp file to avoid shell escaping issues
+    const msgFile = path.join(worktreePath, '.quick-pr-commit-msg');
+    fs.writeFileSync(msgFile, commitMsg, 'utf-8');
+
+    try {
+      await execAsync(`git commit -F "${msgFile}"`, { cwd: worktreePath, timeout: 30000 });
+    } finally {
+      if (fs.existsSync(msgFile)) {
+        fs.unlinkSync(msgFile);
+      }
+    }
+
     info('[gitService.commitAndPush]', 'Commit successful', { branchName });
 
-    await repo.push('origin', branchName, true);
+    await execAsync(`git push -u origin "${branchName}"`, { cwd: worktreePath, timeout: 60000 });
     info('[gitService.commitAndPush]', 'Push successful', { branchName });
 
     return true;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     logError('[gitService.commitAndPush]', 'Commit or push failed', {
+      worktreePath,
       branchName,
       commitMsgPreview: commitMsg.slice(0, 80),
     }, e);
@@ -315,20 +334,34 @@ export async function commitAndPush(
 }
 
 export async function deleteWorktree(
-  repo: Repository,
+  mainRepoPath: string,
   worktreePath: string,
 ): Promise<boolean> {
   info('[gitService.deleteWorktree]', 'Deleting worktree', { worktreePath });
 
   try {
-    await repo.deleteWorktree(worktreePath, { force: true });
+    await execAsync(`git worktree remove --force "${worktreePath}"`, {
+      cwd: mainRepoPath,
+      timeout: 30000,
+    });
     info('[gitService.deleteWorktree]', 'Worktree deleted', { worktreePath });
     return true;
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logError('[gitService.deleteWorktree]', 'Failed to delete worktree', { worktreePath }, e);
-    vscode.window.showErrorMessage(`Failed to delete worktree: ${msg}`);
-    return false;
+    // If git worktree remove fails, force-remove the directory and prune
+    try {
+      warn('[gitService.deleteWorktree]', 'git worktree remove failed, trying force cleanup', { worktreePath });
+      if (fs.existsSync(worktreePath)) {
+        fs.rmSync(worktreePath, { recursive: true, force: true });
+      }
+      await execAsync('git worktree prune', { cwd: mainRepoPath, timeout: 10000 });
+      info('[gitService.deleteWorktree]', 'Worktree force-removed', { worktreePath });
+      return true;
+    } catch (rmError: unknown) {
+      const msg = rmError instanceof Error ? rmError.message : String(rmError);
+      logError('[gitService.deleteWorktree]', 'Failed to delete worktree', { worktreePath }, rmError);
+      vscode.window.showErrorMessage(`Failed to delete worktree: ${msg}`);
+      return false;
+    }
   }
 }
 

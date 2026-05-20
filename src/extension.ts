@@ -4,7 +4,6 @@ import {
   getCurrentRepo,
   getChangedFiles,
   createWorktree,
-  findWorktreeRepo,
   commitAndPush,
   copyFilesToWorktree,
   deleteWorktree,
@@ -69,34 +68,24 @@ export function activate(context: vscode.ExtensionContext) {
       const worktreePath = await createWorktree(
         gitStatus.repo,
         branchName,
-        gitStatus.repo.rootUri,
       );
       if (!worktreePath) return;
 
       info('[extension]', 'Worktree created', { worktreePath });
 
       try {
-        // Step 7: Copy selected files to worktree and commit
-        const worktreeRepo = await findWorktreeRepo(worktreePath);
-        if (!worktreeRepo) {
-          vscode.window.showErrorMessage('Could not find worktree repository');
-          logError('[extension]', 'Worktree repo not found after creation', { worktreePath });
-          return;
-        }
-
         // Copy selected files from original repo to worktree
         const filesCopied = await copyFilesToWorktree(
           gitStatus.repo.rootUri.fsPath,
           worktreePath,
           selectedFiles,
-          worktreeRepo,
         );
         if (!filesCopied) return;
 
         info('[extension]', 'Files copied to worktree', { fileCount: selectedFiles.length });
 
         const success = await commitAndPush(
-          worktreeRepo,
+          worktreePath,
           commitMsg,
           branchName,
         );
@@ -127,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
         );
 
         if (autoCleanup) {
-          await deleteWorktree(gitStatus.repo, worktreePath);
+          await deleteWorktree(gitStatus.repo.rootUri.fsPath, worktreePath);
           info('[extension]', 'Worktree auto-cleaned', { worktreePath });
         } else {
           const keep = await vscode.window.showQuickPick(
@@ -138,7 +127,7 @@ export function activate(context: vscode.ExtensionContext) {
             },
           );
           if (keep === 'Delete worktree') {
-            await deleteWorktree(gitStatus.repo, worktreePath);
+            await deleteWorktree(gitStatus.repo.rootUri.fsPath, worktreePath);
             info('[extension]', 'Worktree deleted by user choice', { worktreePath });
           }
         }
