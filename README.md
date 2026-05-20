@@ -38,9 +38,11 @@ A VS Code extension that streamlines creating GitHub Pull Requests using a **wor
 
 - **Worktree isolation**: Your working directory stays untouched — all operations happen in a temporary worktree
 - **File-level selection**: Include only the changes you want in each PR
-- **AI-powered generation** (optional): Auto-generate PR title and body using OpenAI-compatible APIs
+- **AI-powered generation** (optional): Auto-generate PR title, body, commit message, and branch name using OpenAI-compatible APIs — only fills empty fields, preserving your existing input
 - **SSH fallback**: Automatically retries push via SSH if HTTPS connection fails
-- **Customizable rules**: Project-level PR title/body templates via `.quick-pr/` directory
+- **Customizable rules**: Project-level PR title/body/commit message/branch name templates via `.quick-pr/` directory
+- **Auto-initialized config**: `.quick-pr/` directory with default settings is created automatically on first activation
+- **Full debug logging**: Complete AI prompts and raw responses are logged to `.quick-pr/log.log` for troubleshooting
 
 ## Configuration
 
@@ -49,6 +51,7 @@ A VS Code extension that streamlines creating GitHub Pull Requests using a **wor
 | `quick-pr.ai.enabled` | `false` | Enable AI generation for PR title and body |
 | `quick-pr.ai.apiKey` | `""` | API key for OpenAI-compatible API |
 | `quick-pr.ai.baseUrl` | `""` | Base URL for OpenAI-compatible API |
+| `quick-pr.ai.model` | `gpt-4o-mini` | Model name for OpenAI-compatible API |
 | `quick-pr.ai.promptTemplate` | *(built-in)* | System prompt for AI generation |
 | `quick-pr.cleanupWorktreeAfterPr` | `true` | Delete worktree automatically after PR creation |
 
@@ -65,6 +68,8 @@ Place `.quick-pr/settings.json` in your project root:
 Optional rule files:
 - `.quick-pr/PR title rule.md` — Custom title format rules
 - `.quick-pr/PR body rule.md` — Custom body template rules
+- `.quick-pr/commit message rule.md` — Custom commit message format rules
+- `.quick-pr/branch name rule.md` — Custom branch naming rules
 
 ## Development
 
@@ -94,10 +99,10 @@ npm run build
 src/
 ├── extension.ts      # Extension entry point & command registration
 ├── inputService.ts   # Webview-based PR form UI
-├── gitService.ts     # Git operations (worktree, commit, push)
+├── gitService.ts     # Git operations (worktree, commit, push, diff, log)
 ├── prService.ts      # GitHub CLI interaction (gh pr create)
 ├── projectConfig.ts  # Project-level configuration loader
-├── aiService.ts      # AI-powered PR content generation
+├── aiService.ts      # AI-powered PR content generation (title, body, commit msg, branch name)
 └── logger.ts         # File-based structured logging
 ```
 

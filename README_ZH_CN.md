@@ -38,9 +38,11 @@
 
 - **Worktree 隔离**：所有操作在临时 worktree 中进行，不影响你的工作目录
 - **文件级选择**：精确控制每次 PR 包含的变更
-- **AI 辅助生成**（可选）：基于 OpenAI 兼容 API 自动生成 PR 标题和内容
+- **AI 辅助生成**（可选）：基于 OpenAI 兼容 API 自动生成 PR 标题、内容、提交信息和分支名 — 仅填充空字段，保留用户已有输入
 - **SSH 回退**：HTTPS 推送失败时自动尝试 SSH 方式
-- **自定义规则**：通过 `.quick-pr/` 目录配置项目级 PR 标题/内容模板
+- **自定义规则**：通过 `.quick-pr/` 目录配置项目级 PR 标题/内容/提交信息/分支名模板
+- **配置自动初始化**：首次激活时自动创建 `.quick-pr/` 目录及默认配置
+- **完整调试日志**：AI 完整提示词和原始回复均记录到 `.quick-pr/log.log`，方便排查问题
 
 ## 配置项
 
@@ -49,6 +51,7 @@
 | `quick-pr.ai.enabled` | `false` | 启用 AI 生成 PR 标题和内容 |
 | `quick-pr.ai.apiKey` | `""` | OpenAI 兼容 API 的密钥 |
 | `quick-pr.ai.baseUrl` | `""` | OpenAI 兼容 API 的地址 |
+| `quick-pr.ai.model` | `gpt-4o-mini` | OpenAI 兼容 API 的模型名称 |
 | `quick-pr.ai.promptTemplate` | (内置) | AI 生成的系统提示词 |
 | `quick-pr.cleanupWorktreeAfterPr` | `true` | 创建 PR 后自动删除 worktree |
 
@@ -65,6 +68,8 @@
 可选规则文件：
 - `.quick-pr/PR title rule.md` — 自定义标题格式规则
 - `.quick-pr/PR body rule.md` — 自定义内容模板规则
+- `.quick-pr/commit message rule.md` — 自定义提交信息格式规则
+- `.quick-pr/branch name rule.md` — 自定义分支命名规则
 
 ## 开发指南
 
@@ -94,10 +99,10 @@ npm run build
 src/
 ├── extension.ts      # 扩展入口与命令注册
 ├── inputService.ts   # 基于 Webview 的 PR 表单界面
-├── gitService.ts     # Git 操作（worktree、提交、推送）
+├── gitService.ts     # Git 操作（worktree、提交、推送、diff、日志）
 ├── prService.ts      # GitHub CLI 交互（gh pr create）
 ├── projectConfig.ts  # 项目级配置加载
-├── aiService.ts      # AI 生成 PR 内容
+├── aiService.ts      # AI 生成 PR 内容（标题、内容、提交信息、分支名）
 └── logger.ts         # 基于文件的日志记录
 ```
 
