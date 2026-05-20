@@ -4,6 +4,8 @@ import { info, warn, error as logError } from './logger';
 interface AiResponse {
   title: string;
   body: string;
+  commitMsg: string;
+  branchName: string;
 }
 
 function getConfig() {
@@ -22,13 +24,35 @@ function buildUserPrompt(
   branchName: string,
   prTitleRule: string,
   prBodyRule: string,
+  commitMessageRule: string,
+  branchNameRule: string,
+  recentCommits: string[],
 ): string {
   const parts: string[] = [
-    'Generate a pull request title and description for the following changes:',
+    'Generate a pull request title, description, commit message, and branch name for the following changes:',
     '',
-    `Commit message: ${commitMsg}`,
-    `Branch name: ${branchName}`,
+    `Current commit hint: ${commitMsg}`,
+    `Current branch hint: ${branchName}`,
   ];
+
+  if (recentCommits.length > 0) {
+    parts.push('');
+    parts.push('Recent commit history (use as style reference for the commit message):');
+    parts.push(recentCommits.map((c, i) => `${i + 1}. ${c}`).join('\n'));
+  }
+
+  if (commitMessageRule) {
+    parts.push('');
+    parts.push('Commit message rules:');
+    parts.push(commitMessageRule);
+  }
+
+  if (branchNameRule) {
+    parts.push('');
+    parts.push('Branch name rules:');
+    parts.push(branchNameRule);
+  }
+
   if (prTitleRule) {
     parts.push('');
     parts.push('Title rules:');
@@ -40,7 +64,7 @@ function buildUserPrompt(
     parts.push(prBodyRule);
   }
   parts.push('');
-  parts.push('Respond ONLY with a JSON object: { "title": "...", "body": "..." }');
+  parts.push('Respond ONLY with a JSON object: { "commitMsg": "...", "branchName": "...", "title": "...", "body": "..." }');
   return parts.join('\n');
 }
 
@@ -49,6 +73,9 @@ export async function generatePrContent(
   branchName: string,
   prTitleRule: string,
   prBodyRule: string,
+  commitMessageRule: string = '',
+  branchNameRule: string = '',
+  recentCommits: string[] = [],
 ): Promise<AiResponse | null> {
   const { enabled, apiKey, baseUrl, model, promptTemplate } = getConfig();
 
@@ -77,6 +104,9 @@ export async function generatePrContent(
     hasPromptTemplate: !!promptTemplate,
     hasTitleRule: !!prTitleRule,
     hasBodyRule: !!prBodyRule,
+    hasCommitMessageRule: !!commitMessageRule,
+    hasBranchNameRule: !!branchNameRule,
+    recentCommitsCount: recentCommits.length,
   });
 
   try {
@@ -92,7 +122,7 @@ export async function generatePrContent(
           { role: 'system', content: promptTemplate },
           {
             role: 'user',
-            content: buildUserPrompt(commitMsg, branchName, prTitleRule, prBodyRule),
+            content: buildUserPrompt(commitMsg, branchName, prTitleRule, prBodyRule, commitMessageRule, branchNameRule, recentCommits),
           },
         ],
         temperature: 0.7,
@@ -125,8 +155,15 @@ export async function generatePrContent(
     info('[aiService.generatePrContent]', 'AI content generated successfully', {
       hasTitle: !!parsed.title,
       hasBody: !!parsed.body,
+      hasCommitMsg: !!parsed.commitMsg,
+      hasBranchName: !!parsed.branchName,
     });
-    return { title: parsed.title || '', body: parsed.body || '' };
+    return {
+      commitMsg: parsed.commitMsg || commitMsg,
+      branchName: parsed.branchName || branchName,
+      title: parsed.title || '',
+      body: parsed.body || '',
+    };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     logError('[aiService.generatePrContent]', 'AI request failed', {

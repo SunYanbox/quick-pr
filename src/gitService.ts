@@ -480,3 +480,21 @@ export async function openPrUrl(url: string): Promise<void> {
     info('[gitService.openPrUrl]', 'User dismissed PR URL prompt');
   }
 }
+
+export async function getRecentCommits(workspaceRoot: string, count: number = 5): Promise<string[]> {
+  try {
+    const { stdout } = await execAsync(
+      `git log -${count} --format=%s%n%b%n---`,
+      { cwd: workspaceRoot, timeout: 10000 },
+    );
+    const commits = stdout
+      .split('---\n')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    info('[gitService.getRecentCommits]', 'Recent commits fetched', { count: commits.length });
+    return commits;
+  } catch (e: unknown) {
+    warn('[gitService.getRecentCommits]', 'Failed to fetch recent commits', { count });
+    return [];
+  }
+}

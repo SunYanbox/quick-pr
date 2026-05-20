@@ -11,9 +11,19 @@ import {
 } from './gitService';
 import { checkGhCli, createPr } from './prService';
 import { initLogger, info, error as logError } from './logger';
+import { initProjectConfig } from './projectConfig';
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Quick PR extension activated');
+
+  // Initialize project config files on activation
+  const workspaceRoot =
+    vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+  if (workspaceRoot) {
+    initProjectConfig(workspaceRoot);
+    initLogger(workspaceRoot);
+    info('[extension]', 'Project config initialized on activation', { workspaceRoot });
+  }
 
   const disposable = vscode.commands.registerCommand(
     'quick-pr.createPr',

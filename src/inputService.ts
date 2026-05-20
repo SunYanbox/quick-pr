@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { generatePrContent } from './aiService';
 import { loadProjectConfig } from './projectConfig';
+import { getRecentCommits } from './gitService';
 import { info, warn, error as logError } from './logger';
 
 export interface CollectedInputs {
@@ -275,6 +276,8 @@ function getWebviewHtml(
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (msg.type === 'aiResult') {
+        if (msg.commitMsg) document.getElementById('commitMsg').value = msg.commitMsg;
+        if (msg.branchName) document.getElementById('branchName').value = msg.branchName;
         if (msg.title) document.getElementById('prTitle').value = msg.title;
         if (msg.body) document.getElementById('prBody').value = msg.body;
       }
@@ -401,10 +404,15 @@ export async function collectInputs(
             msg.branchName,
             projectConfig.prTitleRule,
             projectConfig.prBodyRule,
+            projectConfig.commitMessageRule,
+            projectConfig.branchNameRule,
+            await getRecentCommits(workspaceRoot),
           );
           if (aiResult) {
             panel.webview.postMessage({
               type: 'aiResult',
+              commitMsg: aiResult.commitMsg,
+              branchName: aiResult.branchName,
               title: aiResult.title,
               body: aiResult.body,
             });

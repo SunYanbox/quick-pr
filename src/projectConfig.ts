@@ -7,19 +7,49 @@ export interface ProjectSettings {
   defaultBaseBranch: string;
   prTitleRulePath: string;
   prBodyRulePath: string;
+  commitMessageRulePath: string;
+  branchNameRulePath: string;
 }
 
 export interface ProjectConfigData {
   settings: ProjectSettings;
   prTitleRule: string;
   prBodyRule: string;
+  commitMessageRule: string;
+  branchNameRule: string;
 }
 
 const DEFAULT_SETTINGS: ProjectSettings = {
   defaultBaseBranch: 'main',
   prTitleRulePath: '.quick-pr/PR title rule.md',
   prBodyRulePath: '.quick-pr/PR body rule.md',
+  commitMessageRulePath: '.quick-pr/commit message rule.md',
+  branchNameRulePath: '.quick-pr/branch name rule.md',
 };
+
+export function initProjectConfig(workspaceRoot: string): void {
+  const configDir = path.join(workspaceRoot, '.quick-pr');
+
+  // Create .quick-pr directory if it doesn't exist
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
+    info('[projectConfig.initProjectConfig]', 'Created .quick-pr directory', { configDir });
+  }
+
+  // Create settings.json with defaults if it doesn't exist
+  const settingsPath = path.join(configDir, 'settings.json');
+  if (!fs.existsSync(settingsPath)) {
+    fs.writeFileSync(settingsPath, JSON.stringify(DEFAULT_SETTINGS, null, 2), 'utf-8');
+    info('[projectConfig.initProjectConfig]', 'Created default settings.json', { settingsPath });
+  }
+
+  // Create .gitignore inside .quick-pr to exclude its contents from git tracking
+  const gitignorePath = path.join(configDir, '.gitignore');
+  if (!fs.existsSync(gitignorePath)) {
+    fs.writeFileSync(gitignorePath, '# Created by Quick PR\n*\n', 'utf-8');
+    info('[projectConfig.initProjectConfig]', 'Created .gitignore for .quick-pr', { gitignorePath });
+  }
+}
 
 export function loadProjectConfig(workspaceRoot: string): ProjectConfigData {
   const configDir = path.join(workspaceRoot, '.quick-pr');
@@ -66,10 +96,14 @@ export function loadProjectConfig(workspaceRoot: string): ProjectConfigData {
 
   const prTitleRule = readOptionalFile(settings.prTitleRulePath);
   const prBodyRule = readOptionalFile(settings.prBodyRulePath);
+  const commitMessageRule = readOptionalFile(settings.commitMessageRulePath);
+  const branchNameRule = readOptionalFile(settings.branchNameRulePath);
 
   info('[projectConfig.loadProjectConfig]', 'Config loaded', {
     hasTitleRule: !!prTitleRule,
     hasBodyRule: !!prBodyRule,
+    hasCommitMessageRule: !!commitMessageRule,
+    hasBranchNameRule: !!branchNameRule,
     titleRuleLength: prTitleRule.length,
     bodyRuleLength: prBodyRule.length,
   });
@@ -78,5 +112,7 @@ export function loadProjectConfig(workspaceRoot: string): ProjectConfigData {
     settings,
     prTitleRule,
     prBodyRule,
+    commitMessageRule,
+    branchNameRule,
   };
 }
