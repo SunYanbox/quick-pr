@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { generatePrContent } from './aiService';
 import { loadProjectConfig } from './projectConfig';
 
@@ -15,6 +16,7 @@ function getWebviewHtml(
   projectConfig: { settings: { defaultBaseBranch: string } },
   aiEnabled: boolean,
   changedFiles: { path: string; status: string }[],
+  workspaceRoot: string,
 ): string {
   const defaultBase = projectConfig.settings.defaultBaseBranch;
   return /* html */ `
@@ -157,13 +159,13 @@ function getWebviewHtml(
 <body>
   <h2>Create Pull Request</h2>
 
-  <div class="form-group">
+  <div class="form-group" id="changedFilesGroup" style="${changedFiles.length === 0 ? 'display:none' : ''}">
     <label>Changed Files</label>
     <div class="file-list" id="fileList">
       ${changedFiles.map((f, i) => `
       <label class="file-item">
-        <input type="checkbox" class="file-checkbox" data-index="${i}" checked />
-        <span class="file-path">${f.path}</span>
+        <input type="checkbox" class="file-checkbox" checked />
+        <span class="file-path">${path.relative(workspaceRoot, f.path)}</span>
         <span class="file-status ${f.status}">${f.status}</span>
       </label>
       `).join('')}
@@ -336,7 +338,7 @@ export async function collectInputs(
       },
     );
 
-    panel.webview.html = getWebviewHtml(projectConfig, aiEnabled, changedFiles);
+    panel.webview.html = getWebviewHtml(projectConfig, aiEnabled, changedFiles, workspaceRoot);
 
     let resolved = false;
 
