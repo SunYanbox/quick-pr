@@ -40,9 +40,9 @@ A VS Code extension that streamlines creating GitHub Pull Requests using a **wor
 - **File-level selection**: Include only the changes you want in each PR
 - **AI-powered generation** (optional): Auto-generate PR title, body, commit message, and branch name using OpenAI-compatible APIs — only fills empty fields, preserving your existing input
 - **SSH fallback**: Automatically retries push via SSH if HTTPS connection fails
-- **Customizable rules**: Project-level PR title/body/commit message/branch name templates via `.quick-pr/` directory
-- **Auto-initialized config**: `.quick-pr/` directory with default settings is created automatically on first activation
-- **Full debug logging**: Complete AI prompts and raw responses are logged to `.quick-pr/log.log` for troubleshooting
+- **Customizable rules**: Project-level PR title/body/commit message/branch name templates via `.quick-pr-studio/` directory
+- **Auto-initialized config**: `.quick-pr-studio/` directory with default settings is created automatically on first activation
+- **Full debug logging**: Complete AI prompts and raw responses are logged to `.quick-pr-studio/log.log` for troubleshooting
 - **Loading indicators**: Buttons disable automatically on click and show progress text; VS Code notifications display real-time progress for each step
 
 ## Configuration
@@ -58,7 +58,7 @@ A VS Code extension that streamlines creating GitHub Pull Requests using a **wor
 
 ### Project-level Configuration
 
-Place `.quick-pr/settings.json` in your project root:
+Place `.quick-pr-studio/settings.json` in your project root:
 
 ```json
 {
@@ -67,10 +67,10 @@ Place `.quick-pr/settings.json` in your project root:
 ```
 
 Optional rule files:
-- `.quick-pr/PR title rule.md` — Custom title format rules
-- `.quick-pr/PR body rule.md` — Custom body template rules
-- `.quick-pr/commit message rule.md` — Custom commit message format rules
-- `.quick-pr/branch name rule.md` — Custom branch naming rules
+- `.quick-pr-studio/PR title rule.md` — Custom title format rules
+- `.quick-pr-studio/PR body rule.md` — Custom body template rules
+- `.quick-pr-studio/commit message rule.md` — Custom commit message format rules
+- `.quick-pr-studio/branch name rule.md` — Custom branch naming rules
 
 ## Development
 
