@@ -38,6 +38,11 @@
           "default": "",
           "description": "Base URL for OpenAI-compatible API (e.g. https://api.openai.com/v1)"
         },
+        "quick-pr.ai.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "Model name for OpenAI-compatible API (e.g. gpt-4o-mini, deepseek-v4-flash)"
+        },
         "quick-pr.ai.promptTemplate": {
           "type": "string",
           "default": "Generate a professional GitHub pull request title and description based on the following commit information. Return your response as JSON with \"title\" and \"body\" fields.",

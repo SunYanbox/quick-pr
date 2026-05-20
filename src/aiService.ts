@@ -12,6 +12,7 @@ function getConfig() {
     enabled: config.get<boolean>('ai.enabled', false),
     apiKey: config.get<string>('ai.apiKey', ''),
     baseUrl: config.get<string>('ai.baseUrl', ''),
+    model: config.get<string>('ai.model', 'gpt-4o-mini'),
     promptTemplate: config.get<string>('ai.promptTemplate', ''),
   };
 }
@@ -49,7 +50,7 @@ export async function generatePrContent(
   prTitleRule: string,
   prBodyRule: string,
 ): Promise<AiResponse | null> {
-  const { enabled, apiKey, baseUrl, promptTemplate } = getConfig();
+  const { enabled, apiKey, baseUrl, model, promptTemplate } = getConfig();
 
   if (!enabled) {
     info('[aiService.generatePrContent]', 'AI generation disabled, skipping');
@@ -83,10 +84,10 @@ export async function generatePrContent(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey.slice(0, 8)}...`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model,
         messages: [
           { role: 'system', content: promptTemplate },
           {
