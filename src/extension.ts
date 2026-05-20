@@ -2,10 +2,11 @@ import * as vscode from 'vscode';
 import { collectInputs } from './inputService';
 import {
   getCurrentRepo,
-  stageAllChanges,
+  getChangedFiles,
   createWorktree,
   findWorktreeRepo,
   commitAndPush,
+  copyFilesToWorktree,
   deleteWorktree,
   openPrUrl,
 } from './gitService';
@@ -22,12 +23,6 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // Step 1: Collect inputs from user
-      const inputs = await collectInputs(workspaceRoot);
-      if (!inputs) return; // user cancelled
-
-      const { commitMsg, branchName, prTitle, prBody, prBase } = inputs;
-
       // Step 2: Check gh CLI
       const ghAvailable = await checkGhCli();
       if (!ghAvailable) return;
@@ -36,31 +31,20 @@ export function activate(context: vscode.ExtensionContext) {
       const gitStatus = getCurrentRepo();
       if (!gitStatus) return;
 
-      // Step 4: Handle changes
-      const hasStaged = gitStatus.hasStagedChanges;
-      const hasWorking = gitStatus.hasWorkingChanges;
-
-      if (!hasStaged && !hasWorking) {
-        const action = await vscode.window.showWarningMessage(
-          'No changes detected in the repository.',
-          { modal: true },
-        );
+      // Step 4: Get changed files for user selection
+      const changedFiles = getChangedFiles(gitStatus.repo);
+      if (changedFiles.length === 0) {
+        vscode.window.showWarningMessage('No changes detected in the repository.');
         return;
       }
 
-      if (hasWorking && !hasStaged) {
-        const action = await vscode.window.showWarningMessage(
-          'You have unstaged changes. Stage all and proceed?',
-          { modal: true },
-          'Yes, stage all',
-        );
-        if (action !== 'Yes, stage all') return;
+      // Step 5: Collect inputs with file selection
+      const inputs = await collectInputs(workspaceRoot, changedFiles);
+      if (!inputs) return; // user cancelled
 
-        const staged = await stageAllChanges(gitStatus.repo);
-        if (!staged) return;
-      }
+      const { commitMsg, branchName, prTitle, prBody, prBase, selectedFiles } = inputs;
 
-      // Step 5: Create worktree
+      // Step 6: Create worktree
       const worktreePath = await createWorktree(
         gitStatus.repo,
         branchName,
@@ -69,14 +53,21 @@ export function activate(context: vscode.ExtensionContext) {
       if (!worktreePath) return;
 
       try {
-        // Step 6: Find worktree repo and commit+push
+        // Step 7: Copy selected files to worktree and commit
         const worktreeRepo = await findWorktreeRepo(worktreePath);
         if (!worktreeRepo) {
-          vscode.window.showErrorMessage(
-            'Could not find worktree repository',
-          );
+          vscode.window.showErrorMessage('Could not find worktree repository');
           return;
         }
+
+        // Copy selected files from original repo to worktree
+        const filesCopied = await copyFilesToWorktree(
+          gitStatus.repo.rootUri.fsPath,
+          worktreePath,
+          selectedFiles,
+          worktreeRepo,
+        );
+        if (!filesCopied) return;
 
         const success = await commitAndPush(
           worktreeRepo,
@@ -85,7 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
         );
         if (!success) return;
 
-        // Step 7: Create PR
+        // Step 8: Create PR
         const prUrl = await createPr({
           title: prTitle,
           body: prBody,
@@ -95,10 +86,10 @@ export function activate(context: vscode.ExtensionContext) {
         });
         if (!prUrl) return;
 
-        // Step 8: Open PR URL
+        // Step 9: Open PR URL
         await openPrUrl(prUrl);
 
-        // Step 9: Cleanup worktree
+        // Step 10: Cleanup worktree
         const config = vscode.workspace.getConfiguration('quick-pr');
         const autoCleanup = config.get<boolean>(
           'cleanupWorktreeAfterPr',
