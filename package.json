@@ -45,7 +45,7 @@
         },
         "quick-pr.ai.promptTemplate": {
           "type": "string",
-          "default": "Generate a professional GitHub pull request title and description based on the following commit information. Return your response as JSON with \"title\" and \"body\" fields.",
+          "default": "Generate a professional pull request title, description, commit message, and branch name. Return your response as JSON with \"commitMsg\", \"branchName\", \"title\", and \"body\" fields.",
           "description": "System prompt template for AI PR generation"
         },
         "quick-pr.cleanupWorktreeAfterPr": {

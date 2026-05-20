@@ -32,50 +32,56 @@ function buildUserPrompt(
   recentCommits: string[],
 ): string {
   const parts: string[] = [
-    'Generate a pull request title, description, commit message, and branch name for the following changes:',
+    'You are generating a pull request. Your task is to describe what the DIFF below changed.',
+    'RULE: The DIFF is your ONLY source of content — describe what it actually shows, nothing else.',
     '',
-    'Existing field values (only fill fields that are empty or need improvement; reuse existing values if they are already good):',
-    `- Commit message: "${commitMsg || '(empty)'}"`,
-    `- Branch name: "${branchName || '(empty)'}"`,
-    `- PR title: "${prTitle || '(empty)'}"`,
-    `- PR body: "${prBody || '(empty)'}"`,
   ];
+
+  if (filesDiff) {
+    parts.push('===== DIFF (read this, describe what it changes) =====');
+    parts.push(filesDiff);
+    parts.push('');
+  }
+
+  parts.push('===== EXISTING FIELD VALUES =====');
+  parts.push('These are the user\'s current inputs. Only fill EMPTY fields.');
+  parts.push('IMPORTANT: Treat these as BLANK SLATE format holders. Ignore their content — they may contain examples from unrelated work.');
+  parts.push(`- Commit message: "${commitMsg || '(empty)'}"`);
+  parts.push(`- Branch name: "${branchName || '(empty)'}"`);
+  parts.push(`- PR title: "${prTitle || '(empty)'}"`);
+  parts.push(`- PR body: "${prBody || '(empty)'}"`);
 
   if (recentCommits.length > 0) {
     parts.push('');
-    parts.push('Recent commit history (use as style reference for the commit message):');
+    parts.push('===== RECENT COMMIT SUBJECTS (conventional-commit style reference — IGNORE their content, only note the format pattern) =====');
     parts.push(recentCommits.map((c, i) => `${i + 1}. ${c}`).join('\n'));
   }
 
   if (commitMessageRule) {
     parts.push('');
-    parts.push('Commit message rules:');
+    parts.push('===== COMMIT MESSAGE RULES =====');
     parts.push(commitMessageRule);
   }
 
   if (branchNameRule) {
     parts.push('');
-    parts.push('Branch name rules:');
+    parts.push('===== BRANCH NAME RULES =====');
     parts.push(branchNameRule);
   }
 
   if (prTitleRule) {
     parts.push('');
-    parts.push('Title rules:');
+    parts.push('===== TITLE RULES =====');
     parts.push(prTitleRule);
   }
   if (prBodyRule) {
     parts.push('');
-    parts.push('Body rules:');
+    parts.push('===== BODY RULES =====');
     parts.push(prBodyRule);
-  }
-  if (filesDiff) {
-    parts.push('');
-    parts.push('Diff of selected changes:');
-    parts.push(filesDiff);
   }
   parts.push('');
   parts.push('Respond ONLY with a JSON object: { "commitMsg": "...", "branchName": "...", "title": "...", "body": "..." }');
+  parts.push('FINAL REMINDER: Everything above EXCEPT the DIFF is format/rule reference. The DIFF alone determines what content to write. If the diff is empty or trivial, generate nothing — do not fabricate changes from other sections.');
   return parts.join('\n');
 }
 
@@ -111,6 +117,8 @@ export async function generatePrContent(
     ? `${baseUrl.replace(/\/$/, '')}/chat/completions`
     : 'https://api.openai.com/v1/chat/completions';
 
+  const userPrompt = buildUserPrompt(commitMsg, branchName, prTitle, prBody, filesDiff, prTitleRule, prBodyRule, commitMessageRule, branchNameRule, recentCommits);
+
   info('[aiService.generatePrContent]', 'Sending AI request', {
     commitMsgPreview: commitMsg.slice(0, 80),
     branchName,
@@ -122,6 +130,8 @@ export async function generatePrContent(
     hasBranchNameRule: !!branchNameRule,
     recentCommitsCount: recentCommits.length,
   });
+
+  info('[aiService.generatePrContent]', `\n---------- FULL PROMPT SENT TO AI ----------\nSystem:\n${promptTemplate || '(empty)'}\n\nUser:\n${userPrompt}\n--------------------------------------------`);
 
   try {
     const response = await fetch(url, {
@@ -136,7 +146,7 @@ export async function generatePrContent(
           { role: 'system', content: promptTemplate },
           {
             role: 'user',
-            content: buildUserPrompt(commitMsg, branchName, prTitle, prBody, filesDiff, prTitleRule, prBodyRule, commitMessageRule, branchNameRule, recentCommits),
+            content: userPrompt,
           },
         ],
         temperature: 0.7,
@@ -164,6 +174,8 @@ export async function generatePrContent(
       vscode.window.showErrorMessage('AI response missing content');
       return null;
     }
+
+    info('[aiService.generatePrContent]', `\n---------- AI RAW RESPONSE ----------\n${content}\n-------------------------------------`);
 
     const parsed = JSON.parse(content) as AiResponse;
     info('[aiService.generatePrContent]', 'AI content generated successfully', {

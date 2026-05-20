@@ -490,16 +490,50 @@ export async function getFilesDiff(
 
   try {
     const relativePaths = selectedFiles.map(f => path.relative(workspaceRoot, f));
-    const { stdout } = await execAsync(
-      `git diff HEAD -- ${relativePaths.map(p => `"${p}"`).join(' ')}`,
-      { cwd: workspaceRoot, timeout: 30000, maxBuffer: 1024 * 1024 },
-    );
+    const parts: string[] = [];
 
-    if (!stdout.trim()) return '';
-    if (stdout.length > maxLength) {
-      return stdout.slice(0, maxLength) + '\n...(diff truncated)';
+    // 1) Try git diff HEAD for tracked files
+    const trackedFiles: string[] = [];
+    const untrackedFiles: string[] = [];
+
+    for (const fp of relativePaths) {
+      const { stdout: tracked } = await execAsync(
+        `git ls-files --error-unmatch "${fp}"`,
+        { cwd: workspaceRoot, timeout: 5000 },
+      ).catch(() => ({ stdout: '' }));
+      if (tracked) {
+        trackedFiles.push(fp);
+      } else {
+        untrackedFiles.push(fp);
+      }
     }
-    return stdout;
+
+    if (trackedFiles.length > 0) {
+      const { stdout } = await execAsync(
+        `git diff HEAD -- ${trackedFiles.map(p => `"${p}"`).join(' ')}`,
+        { cwd: workspaceRoot, timeout: 30000, maxBuffer: 1024 * 1024 },
+      );
+      if (stdout.trim()) parts.push(stdout.trim());
+    }
+
+    // 2) For untracked files, show their full content as a unified-diff-style addition
+    for (const fp of untrackedFiles) {
+      const fullPath = path.join(workspaceRoot, fp);
+      if (fs.existsSync(fullPath)) {
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        const lines = content.split('\n');
+        const diffHeader = `diff --git a/${fp} b/${fp}\nnew file mode 100644\nindex 0000000..0000000\n--- /dev/null\n+++ b/${fp}\n`;
+        const body = lines.map(l => `+${l}`).join('\n');
+        parts.push(diffHeader + body);
+      }
+    }
+
+    if (parts.length === 0) return '';
+    const combined = parts.join('\n');
+    if (combined.length > maxLength) {
+      return combined.slice(0, maxLength) + '\n...(diff truncated)';
+    }
+    return combined;
   } catch (e: unknown) {
     warn('[gitService.getFilesDiff]', 'Failed to get file diff', {
       fileCount: selectedFiles.length,
@@ -511,11 +545,11 @@ export async function getFilesDiff(
 export async function getRecentCommits(workspaceRoot: string, count: number = 5): Promise<string[]> {
   try {
     const { stdout } = await execAsync(
-      `git log -${count} --format=%s%n%b%n---`,
+      `git log -${count} --format=%s`,
       { cwd: workspaceRoot, timeout: 10000 },
     );
     const commits = stdout
-      .split('---\n')
+      .split('\n')
       .map(s => s.trim())
       .filter(s => s.length > 0);
     info('[gitService.getRecentCommits]', 'Recent commits fetched', { count: commits.length });
