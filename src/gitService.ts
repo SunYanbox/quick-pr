@@ -16,11 +16,7 @@ interface Repository {
   add(paths: string[]): Promise<void>;
   commit(message: string): Promise<void>;
   push(remote: string, branch: string, setUpstream: boolean): Promise<void>;
-  createWorktree(options: {
-    path: string;
-    commitish?: string;
-    branch?: string;
-  }): Promise<string>;
+  createWorktree(path: string, options?: { commitish?: string; branch?: string }): Promise<string>;
   deleteWorktree(path: string, options?: { force?: boolean }): Promise<void>;
   kind: string;
 }
@@ -155,8 +151,7 @@ export async function createWorktree(
   }
 
   try {
-    const createdPath = await repo.createWorktree({
-      path: worktreePath.fsPath,
+    const createdPath = await repo.createWorktree(worktreePath.fsPath, {
       commitish: repo.state.HEAD?.name,
       branch: branchName,
     });

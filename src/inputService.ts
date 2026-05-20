@@ -12,6 +12,15 @@ export interface CollectedInputs {
   selectedFiles: string[];
 }
 
+function normalizePath(p: string): string {
+  const resolved = path.resolve(p);
+  // On Windows, uppercase drive letter so path.relative works correctly
+  if (/^[a-z]:/.test(resolved)) {
+    return resolved.charAt(0).toUpperCase() + resolved.slice(1);
+  }
+  return resolved;
+}
+
 function getWebviewHtml(
   projectConfig: { settings: { defaultBaseBranch: string } },
   aiEnabled: boolean,
@@ -19,6 +28,7 @@ function getWebviewHtml(
   workspaceRoot: string,
 ): string {
   const defaultBase = projectConfig.settings.defaultBaseBranch;
+  const normalizedRoot = normalizePath(workspaceRoot);
   return /* html */ `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -165,7 +175,7 @@ function getWebviewHtml(
       ${changedFiles.map((f, i) => `
       <label class="file-item">
         <input type="checkbox" class="file-checkbox" checked />
-        <span class="file-path">${path.relative(workspaceRoot, f.path)}</span>
+        <span class="file-path">${path.relative(normalizedRoot, normalizePath(f.path)).replace(/\\/g, '/')}</span>
         <span class="file-status ${f.status}">${f.status}</span>
       </label>
       `).join('')}

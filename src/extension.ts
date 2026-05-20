@@ -13,6 +13,8 @@ import {
 import { checkGhCli, createPr } from './prService';
 
 export function activate(context: vscode.ExtensionContext) {
+  console.log('Quick PR extension activated');
+
   const disposable = vscode.commands.registerCommand(
     'quick-pr.createPr',
     async () => {
