@@ -10,99 +10,297 @@ export interface CollectedInputs {
   prBase: string;
 }
 
+function getWebviewHtml(
+  projectConfig: { settings: { defaultBaseBranch: string } },
+  aiEnabled: boolean,
+): string {
+  const defaultBase = projectConfig.settings.defaultBaseBranch;
+  return /* html */ `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      color: var(--vscode-input-foreground);
+      background-color: var(--vscode-sideBar-background);
+      padding: 20px;
+      margin: 0;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: 600;
+      color: var(--vscode-editor-foreground);
+    }
+    input, textarea {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid var(--vscode-input-border, transparent);
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      box-sizing: border-box;
+      border-radius: 2px;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--vscode-focusBorder);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+    .error {
+      color: var(--vscode-errorForeground);
+      font-size: 12px;
+      margin-top: 4px;
+      display: none;
+    }
+    .button-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 24px;
+      justify-content: flex-end;
+    }
+    button {
+      border: none;
+      padding: 8px 20px;
+      cursor: pointer;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      border-radius: 2px;
+    }
+    button.primary {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+    }
+    button.primary:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    button.secondary:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    button.ai {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      margin-right: auto;
+    }
+    button.ai:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    h2 {
+      margin-top: 0;
+      margin-bottom: 20px;
+      font-weight: 600;
+      color: var(--vscode-editor-foreground);
+    }
+    .hint {
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Create Pull Request</h2>
+
+  <div class="form-group">
+    <label for="commitMsg">Commit message *</label>
+    <input type="text" id="commitMsg" placeholder="feat: add user authentication" />
+    <div class="error" id="commitMsgError">Commit message is required</div>
+  </div>
+
+  <div class="form-group">
+    <label for="branchName">New branch name *</label>
+    <input type="text" id="branchName" placeholder="feat/user-auth" />
+    <div class="error" id="branchNameError">Branch name cannot contain spaces</div>
+  </div>
+
+  <div class="form-group">
+    <label for="prTitle">PR Title *</label>
+    <input type="text" id="prTitle" placeholder="Add user authentication feature" />
+    <div class="error" id="prTitleError">PR title is required</div>
+  </div>
+
+  <div class="form-group">
+    <label for="prBody">PR Body</label>
+    <textarea id="prBody" placeholder="Describe the changes..."></textarea>
+  </div>
+
+  <div class="form-group">
+    <label for="prBase">PR target branch *</label>
+    <input type="text" id="prBase" placeholder="main" value="${defaultBase}" />
+    <div class="error" id="prBaseError">Target branch is required</div>
+  </div>
+
+  <div class="button-row">
+    <button class="ai" id="aiBtn" style="${aiEnabled ? '' : 'display:none'}">✨ Generate with AI</button>
+    <button class="secondary" id="cancelBtn">Cancel</button>
+    <button class="primary" id="submitBtn">Create PR</button>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+
+    document.getElementById('submitBtn').addEventListener('click', () => validateAndSubmit());
+    document.getElementById('cancelBtn').addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
+
+    const aiBtn = document.getElementById('aiBtn');
+    if (aiBtn) {
+      aiBtn.addEventListener('click', () => {
+        vscode.postMessage({
+          type: 'generateAi',
+          commitMsg: document.getElementById('commitMsg').value,
+          branchName: document.getElementById('branchName').value,
+        });
+      });
+    }
+
+    // Enter key handling: focus moves to next field, but textarea doesn't submit on enter
+    document.querySelectorAll('input').forEach((input) => {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const fields = ['commitMsg', 'branchName', 'prTitle', 'prBody', 'prBase'];
+          const idx = fields.indexOf(input.id);
+          if (idx >= 0 && idx < fields.length - 1) {
+            const next = document.getElementById(fields[idx + 1]);
+            if (next) next.focus();
+          } else {
+            validateAndSubmit();
+          }
+        }
+      });
+    });
+
+    // Listen for AI-generated content
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (msg.type === 'aiResult') {
+        if (msg.title) document.getElementById('prTitle').value = msg.title;
+        if (msg.body) document.getElementById('prBody').value = msg.body;
+      }
+    });
+
+    function validateAndSubmit() {
+      let valid = true;
+
+      const commitMsg = document.getElementById('commitMsg').value.trim();
+      const branchName = document.getElementById('branchName').value.trim();
+      const prTitle = document.getElementById('prTitle').value.trim();
+      const prBase = document.getElementById('prBase').value.trim();
+      const prBody = document.getElementById('prBody').value;
+
+      // Reset errors
+      document.querySelectorAll('.error').forEach(e => e.style.display = 'none');
+
+      if (!commitMsg) {
+        document.getElementById('commitMsgError').style.display = 'block';
+        valid = false;
+      }
+      if (!branchName) {
+        document.getElementById('branchNameError').style.display = 'block';
+        valid = false;
+      } else if (/\\s/.test(branchName)) {
+        document.getElementById('branchNameError').style.display = 'block';
+        valid = false;
+      }
+      if (!prTitle) {
+        document.getElementById('prTitleError').style.display = 'block';
+        valid = false;
+      }
+      if (!prBase) {
+        document.getElementById('prBaseError').style.display = 'block';
+        valid = false;
+      }
+
+      if (valid) {
+        vscode.postMessage({
+          type: 'submit',
+          commitMsg,
+          branchName,
+          prTitle,
+          prBody,
+          prBase,
+        });
+      }
+    }
+  </script>
+</body>
+</html>`;
+}
+
 export async function collectInputs(
   workspaceRoot: string,
 ): Promise<CollectedInputs | null> {
-  const commitMsg = await vscode.window.showInputBox({
-    prompt: 'Commit message',
-    placeHolder: 'feat: add user authentication',
-    title: 'Quick PR (1/5)',
-    validateInput: (value: string) =>
-      value.trim() ? null : 'Commit message is required',
-  });
-  if (!commitMsg) return null;
-
-  const branchName = await vscode.window.showInputBox({
-    prompt: 'New branch name',
-    placeHolder: 'feat/user-auth',
-    title: 'Quick PR (2/5)',
-    validateInput: (value: string) =>
-      /^[^\s]+$/.test(value.trim()) ? null : 'Branch name cannot contain spaces',
-  });
-  if (!branchName) return null;
-
-  // Load project config for AI rules and default base branch
   const projectConfig = loadProjectConfig(workspaceRoot);
-
-  // Try AI generation first if enabled
-  let prTitle = '';
-  let prBody = '';
-  let aiGenerated = false;
-
   const aiEnabled = vscode.workspace
     .getConfiguration('quick-pr')
     .get<boolean>('ai.enabled', false);
 
-  if (aiEnabled) {
-    const aiResult = await generatePrContent(
-      commitMsg,
-      branchName,
-      projectConfig.prTitleRule,
-      projectConfig.prBodyRule,
+  return new Promise<CollectedInputs | null>((resolve) => {
+    const panel = vscode.window.createWebviewPanel(
+      'quickPrInput',
+      'Quick PR',
+      { viewColumn: vscode.ViewColumn.Active, preserveFocus: true },
+      {
+        enableScripts: true,
+        localResourceRoots: [],
+      },
     );
 
-    if (aiResult) {
-      const confirmedTitle = await vscode.window.showInputBox({
-        prompt: 'PR Title (AI generated, edit or confirm)',
-        value: aiResult.title,
-        title: 'Quick PR (3/5) - AI Generated',
-        validateInput: (value: string) =>
-          value.trim() ? null : 'PR title is required',
-      });
-      if (confirmedTitle === undefined) return null;
-      prTitle = confirmedTitle;
+    panel.webview.html = getWebviewHtml(projectConfig, aiEnabled);
 
-      const confirmedBody = await vscode.window.showInputBox({
-        prompt: 'PR Body (AI generated, edit or confirm)',
-        value: aiResult.body,
-        title: 'Quick PR (4/5) - AI Generated',
-      });
-      if (confirmedBody === undefined) return null;
-      prBody = confirmedBody;
+    let resolved = false;
 
-      aiGenerated = true;
-    }
-  }
+    const disposable = panel.webview.onDidReceiveMessage(async (msg) => {
+      if (resolved) return;
+      if (msg.type === 'generateAi') {
+        const aiResult = await generatePrContent(
+          msg.commitMsg,
+          msg.branchName,
+          projectConfig.prTitleRule,
+          projectConfig.prBodyRule,
+        );
+        if (aiResult) {
+          panel.webview.postMessage({
+            type: 'aiResult',
+            title: aiResult.title,
+            body: aiResult.body,
+          });
+        }
+      } else if (msg.type === 'submit') {
+        resolved = true;
+        panel.dispose();
+        resolve({
+          commitMsg: msg.commitMsg,
+          branchName: msg.branchName,
+          prTitle: msg.prTitle,
+          prBody: msg.prBody,
+          prBase: msg.prBase,
+        });
+      } else if (msg.type === 'cancel') {
+        resolved = true;
+        panel.dispose();
+        resolve(null);
+      }
+    });
 
-  if (!aiGenerated) {
-    prTitle =
-      (await vscode.window.showInputBox({
-        prompt: 'PR Title',
-        placeHolder: 'Add user authentication feature',
-        title: 'Quick PR (3/5)',
-        validateInput: (value: string) =>
-          value.trim() ? null : 'PR title is required',
-      })) ?? '';
-    if (!prTitle) return null;
-
-    prBody =
-      (await vscode.window.showInputBox({
-        prompt: 'PR Body (optional)',
-        placeHolder: 'Describe the changes...',
-        title: 'Quick PR (4/5)',
-      })) ?? '';
-  }
-
-  // Base branch with pre-fill from project config (user can change)
-  const defaultBase = projectConfig.settings.defaultBaseBranch;
-  const prBase = await vscode.window.showInputBox({
-    prompt: 'PR target branch',
-    value: defaultBase,
-    title: 'Quick PR (5/5)',
-    validateInput: (value: string) =>
-      value.trim() ? null : 'Target branch is required',
+    panel.onDidDispose(() => {
+      disposable.dispose();
+      if (!resolved) resolve(null);
+    });
   });
-  if (!prBase) return null;
-
-  return { commitMsg, branchName, prTitle, prBody, prBase };
 }

@@ -3,6 +3,7 @@ dist/
 *.vsix
 .vscode/
 .claude/
+.quick-pr/worktrees/
 docs/superpowers/
 .DS_Store
 Thumbs.db

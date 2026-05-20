@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 
 interface GitAPI {
   getAPI(version: number): GitExtensionAPI;
@@ -87,7 +88,17 @@ export async function createWorktree(
   branchName: string,
   rootUri: vscode.Uri,
 ): Promise<string | null> {
-  const worktreePath = vscode.Uri.joinPath(rootUri, `../wt-${branchName}`);
+  const worktreeDir = vscode.Uri.joinPath(rootUri, '.quick-pr', 'worktrees');
+  const worktreePath = vscode.Uri.joinPath(worktreeDir, branchName);
+
+  // Ensure .quick-pr/worktrees/ directory exists
+  try {
+    fs.mkdirSync(worktreeDir.fsPath, { recursive: true });
+  } catch (e: any) {
+    vscode.window.showErrorMessage(`Failed to create worktree directory: ${e.message}`);
+    return null;
+  }
+
   try {
     const createdPath = await repo.createWorktree({
       path: worktreePath.fsPath,
