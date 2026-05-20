@@ -299,6 +299,27 @@ function httpsToSshUrl(httpsUrl: string): string | null {
   return `git@${host}:${path}.git`;
 }
 
+/**
+ * Detect proxy configuration from environment variables or git config.
+ * Priority: HTTPS_PROXY env > HTTP_PROXY env > git http.proxy config.
+ */
+async function detectProxy(cwd: string): Promise<string | null> {
+  const envProxy = process.env.HTTPS_PROXY || process.env.https_proxy ||
+                   process.env.HTTP_PROXY || process.env.http_proxy ||
+                   process.env.ALL_PROXY || process.env.all_proxy;
+  if (envProxy) return envProxy;
+
+  try {
+    const { stdout } = await execAsync('git config --get http.proxy', { cwd, timeout: 5000 });
+    const proxy = stdout.trim();
+    if (proxy) return proxy;
+  } catch {
+    // No git proxy configured
+  }
+
+  return null;
+}
+
 export async function commitAndPush(
   worktreePath: string,
   commitMsg: string,
@@ -338,43 +359,66 @@ export async function commitAndPush(
       info('[gitService.commitAndPush]', 'No changes to commit, skipping', { branchName });
     }
 
-    // Attempt push — if HTTPS fails with connection error, fall back to SSH
+    // Attempt push — if fails, fall back to SSH then proxy
     try {
       await execAsync(`git push -u origin "${branchName}"`, { cwd: worktreePath, timeout: 60000 });
     } catch (pushError: unknown) {
       const pushMsg = pushError instanceof Error ? pushError.message : String(pushError);
-      const pushStderr = (pushError as { stderr?: string }).stderr ?? '';
-      const isConnError = /connection was reset|connection refused|could not resolve host|failed to connect|timed? out/i.test(pushMsg) ||
-        /connection was reset|connection refused|could not resolve host|failed to connect|timed? out/i.test(pushStderr);
+      warn('[gitService.commitAndPush]', 'Initial push failed, attempting fallbacks', {
+        branchName,
+        error: pushMsg,
+      });
 
-      if (isConnError) {
-        warn('[gitService.commitAndPush]', 'HTTPS push failed with connection error, trying SSH fallback', {
-          branchName,
-          error: pushMsg,
-        });
+      // Get remote URL for potential SSH fallback
+      const { stdout: remoteUrl } = await execAsync('git remote get-url origin', {
+        cwd: worktreePath,
+        timeout: 10000,
+      }).catch(() => ({ stdout: '' }));
 
-        // Get the remote URL to derive SSH URL
-        const { stdout: remoteUrl } = await execAsync('git remote get-url origin', {
-          cwd: worktreePath,
-          timeout: 10000,
-        }).catch(() => ({ stdout: '' }));
+      const sshUrl = remoteUrl.trim() && httpsToSshUrl(remoteUrl.trim());
 
-        const sshUrl = remoteUrl.trim() && httpsToSshUrl(remoteUrl.trim());
-        if (sshUrl) {
+      // Fallback 1: SSH
+      if (sshUrl) {
+        try {
           info('[gitService.commitAndPush]', 'Retrying push via SSH', { sshUrl });
           await execAsync(`git push -u "${sshUrl}" "${branchName}"`, {
             cwd: worktreePath,
             timeout: 60000,
           });
           info('[gitService.commitAndPush]', 'SSH push successful', { branchName });
-        } else {
-          // Not an HTTPS URL or couldn't parse — re-throw original error
-          throw pushError;
+
+          // Update origin remote to use SSH for future pushes
+          await execAsync(`git remote set-url origin "${sshUrl}"`, {
+            cwd: worktreePath,
+            timeout: 10000,
+          }).catch(() => {});
+
+          return true;
+        } catch (sshError: unknown) {
+          const sshMsg = sshError instanceof Error ? sshError.message : String(sshError);
+          warn('[gitService.commitAndPush]', 'SSH fallback failed', { error: sshMsg });
         }
-      } else {
-        // Not a connection error — re-throw
-        throw pushError;
       }
+
+      // Fallback 2: Proxy (if proxy is configured)
+      const proxy = await detectProxy(worktreePath);
+      if (proxy) {
+        try {
+          info('[gitService.commitAndPush]', 'Retrying push via proxy');
+          await execAsync(`git -c http.proxy="${proxy}" push -u origin "${branchName}"`, {
+            cwd: worktreePath,
+            timeout: 60000,
+          });
+          info('[gitService.commitAndPush]', 'Proxy push successful', { branchName });
+          return true;
+        } catch (proxyError: unknown) {
+          const proxyMsg = proxyError instanceof Error ? proxyError.message : String(proxyError);
+          warn('[gitService.commitAndPush]', 'Proxy fallback failed', { error: proxyMsg });
+        }
+      }
+
+      // All fallbacks exhausted
+      throw pushError;
     }
 
     info('[gitService.commitAndPush]', 'Push successful', { branchName });

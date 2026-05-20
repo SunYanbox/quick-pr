@@ -48,7 +48,7 @@ export function activate(context: vscode.ExtensionContext) {
       info('[extension]', 'Changed files detected', { fileCount: changedFiles.length });
 
       // Step 5: Collect inputs with file selection
-      const inputs = await collectInputs(workspaceRoot, changedFiles);
+      const inputs = await collectInputs(workspaceRoot, changedFiles, gitStatus.currentBranch);
       if (!inputs) {
         info('[extension]', 'User cancelled input collection');
         return; // user cancelled

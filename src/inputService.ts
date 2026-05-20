@@ -24,11 +24,11 @@ function normalizePath(p: string): string {
 
 function getWebviewHtml(
   projectConfig: { settings: { defaultBaseBranch: string } },
-  aiEnabled: boolean,
   changedFiles: { path: string; status: string }[],
   workspaceRoot: string,
+  currentBranch: string,
 ): string {
-  const defaultBase = projectConfig.settings.defaultBaseBranch;
+  const defaultBase = currentBranch || projectConfig.settings.defaultBaseBranch;
   const normalizedRoot = normalizePath(workspaceRoot);
   return /* html */ `
 <!DOCTYPE html>
@@ -114,6 +114,16 @@ function getWebviewHtml(
     }
     button.ai:hover {
       background: var(--vscode-button-hoverBackground);
+    }
+    button.settings {
+      background: transparent;
+      color: var(--vscode-descriptionForeground);
+      padding: 8px 12px;
+      font-size: 12px;
+      margin-right: auto;
+    }
+    button.settings:hover {
+      color: var(--vscode-editor-foreground);
     }
     h2 {
       margin-top: 0;
@@ -217,7 +227,8 @@ function getWebviewHtml(
   </div>
 
   <div class="button-row">
-    <button class="ai" id="aiBtn" style="${aiEnabled ? '' : 'display:none'}">✨ Generate with AI</button>
+    <button class="settings" id="settingsBtn" title="Open Quick PR settings">⚙ Settings</button>
+    <button class="ai" id="aiBtn">✨ Generate with AI</button>
     <button class="secondary" id="cancelBtn">Cancel</button>
     <button class="primary" id="submitBtn">Create PR</button>
   </div>
@@ -227,6 +238,10 @@ function getWebviewHtml(
 
     document.getElementById('submitBtn').addEventListener('click', () => validateAndSubmit());
     document.getElementById('cancelBtn').addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
+
+    document.getElementById('settingsBtn').addEventListener('click', () => {
+      vscode.postMessage({ type: 'openSettings' });
+    });
 
     const aiBtn = document.getElementById('aiBtn');
     if (aiBtn) {
@@ -334,11 +349,9 @@ function getWebviewHtml(
 export async function collectInputs(
   workspaceRoot: string,
   changedFiles: { path: string; status: string }[],
+  currentBranch: string,
 ): Promise<CollectedInputs | null> {
   const projectConfig = loadProjectConfig(workspaceRoot);
-  const aiEnabled = vscode.workspace
-    .getConfiguration('quick-pr')
-    .get<boolean>('ai.enabled', false);
 
   return new Promise<CollectedInputs | null>((resolve) => {
     const panel = vscode.window.createWebviewPanel(
@@ -351,7 +364,7 @@ export async function collectInputs(
       },
     );
 
-    panel.webview.html = getWebviewHtml(projectConfig, aiEnabled, changedFiles, workspaceRoot);
+    panel.webview.html = getWebviewHtml(projectConfig, changedFiles, workspaceRoot, currentBranch);
 
     let resolved = false;
     let panelDisposed = false;
@@ -359,11 +372,30 @@ export async function collectInputs(
     const disposable = panel.webview.onDidReceiveMessage(async (msg) => {
       if (resolved || panelDisposed) return;
       try {
-        if (msg.type === 'generateAi') {
+        if (msg.type === 'openSettings') {
+          vscode.commands.executeCommand('workbench.action.openSettings', 'quick-pr');
+        } else if (msg.type === 'generateAi') {
           info('[inputService]', 'AI generation requested', {
             commitMsgPreview: (msg.commitMsg || '').slice(0, 80),
             branchName: msg.branchName,
           });
+
+          const isAiEnabled = vscode.workspace
+            .getConfiguration('quick-pr')
+            .get<boolean>('ai.enabled', false);
+
+          if (!isAiEnabled) {
+            const action = await vscode.window.showWarningMessage(
+              'AI generation is not enabled. Enable it in Quick PR settings to use this feature.',
+              'Open Settings',
+              'Cancel',
+            );
+            if (action === 'Open Settings') {
+              vscode.commands.executeCommand('workbench.action.openSettings', 'quick-pr.ai');
+            }
+            return;
+          }
+
           const aiResult = await generatePrContent(
             msg.commitMsg,
             msg.branchName,
