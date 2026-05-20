@@ -8,11 +8,13 @@ export interface CollectedInputs {
   prTitle: string;
   prBody: string;
   prBase: string;
+  selectedFiles: string[];
 }
 
 function getWebviewHtml(
   projectConfig: { settings: { defaultBaseBranch: string } },
   aiEnabled: boolean,
+  changedFiles: { path: string; status: string }[],
 ): string {
   const defaultBase = projectConfig.settings.defaultBaseBranch;
   return /* html */ `
@@ -111,10 +113,63 @@ function getWebviewHtml(
       color: var(--vscode-descriptionForeground);
       margin-top: 2px;
     }
+    .file-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--vscode-input-border, transparent);
+      background: var(--vscode-input-background);
+      border-radius: 2px;
+      padding: 4px 0;
+    }
+    .file-item {
+      display: flex;
+      align-items: center;
+      padding: 4px 10px;
+      cursor: pointer;
+      gap: 8px;
+    }
+    .file-item:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .file-item input[type="checkbox"] {
+      flex-shrink: 0;
+    }
+    .file-path {
+      flex: 1;
+      font-size: var(--vscode-font-size);
+      color: var(--vscode-editor-foreground);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .file-status {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .file-status.staged { background: #1b7837; color: #fff; }
+    .file-status.modified { background: #005cc5; color: #fff; }
+    .file-status.added { background: #28a745; color: #fff; }
+    .file-status.deleted { background: #cb2431; color: #fff; }
   </style>
 </head>
 <body>
   <h2>Create Pull Request</h2>
+
+  <div class="form-group">
+    <label>Changed Files</label>
+    <div class="file-list" id="fileList">
+      ${changedFiles.map((f, i) => `
+      <label class="file-item">
+        <input type="checkbox" class="file-checkbox" data-index="${i}" checked />
+        <span class="file-path">${f.path}</span>
+        <span class="file-status ${f.status}">${f.status}</span>
+      </label>
+      `).join('')}
+    </div>
+    <div class="hint">Uncheck files you don't want to include in this PR</div>
+  </div>
 
   <div class="form-group">
     <label for="commitMsg">Commit message *</label>
@@ -194,6 +249,17 @@ function getWebviewHtml(
       }
     });
 
+    function getSelectedFiles() {
+      const checkboxes = document.querySelectorAll('.file-checkbox');
+      const files = [];
+      checkboxes.forEach((cb, index) => {
+        if (cb.checked) {
+          files.push(${JSON.stringify(changedFiles.map(f => f.path))}[index]);
+        }
+      });
+      return files;
+    }
+
     function validateAndSubmit() {
       let valid = true;
 
@@ -202,6 +268,7 @@ function getWebviewHtml(
       const prTitle = document.getElementById('prTitle').value.trim();
       const prBase = document.getElementById('prBase').value.trim();
       const prBody = document.getElementById('prBody').value;
+      const selectedFiles = getSelectedFiles();
 
       // Reset errors
       document.querySelectorAll('.error').forEach(e => e.style.display = 'none');
@@ -225,6 +292,10 @@ function getWebviewHtml(
         document.getElementById('prBaseError').style.display = 'block';
         valid = false;
       }
+      if (selectedFiles.length === 0) {
+        document.querySelector('.file-list')?.scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
 
       if (valid) {
         vscode.postMessage({
@@ -234,6 +305,7 @@ function getWebviewHtml(
           prTitle,
           prBody,
           prBase,
+          selectedFiles,
         });
       }
     }
@@ -244,6 +316,7 @@ function getWebviewHtml(
 
 export async function collectInputs(
   workspaceRoot: string,
+  changedFiles: { path: string; status: string }[],
 ): Promise<CollectedInputs | null> {
   const projectConfig = loadProjectConfig(workspaceRoot);
   const aiEnabled = vscode.workspace
@@ -261,7 +334,7 @@ export async function collectInputs(
       },
     );
 
-    panel.webview.html = getWebviewHtml(projectConfig, aiEnabled);
+    panel.webview.html = getWebviewHtml(projectConfig, aiEnabled, changedFiles);
 
     let resolved = false;
 
@@ -290,6 +363,7 @@ export async function collectInputs(
           prTitle: msg.prTitle,
           prBody: msg.prBody,
           prBase: msg.prBase,
+          selectedFiles: msg.selectedFiles,
         });
       } else if (msg.type === 'cancel') {
         resolved = true;
