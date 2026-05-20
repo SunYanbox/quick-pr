@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 
 interface GitAPI {
   getAPI(version: number): GitExtensionAPI;
@@ -51,6 +52,31 @@ export interface GitStatus {
   repo: Repository;
 }
 
+export interface ChangedFile {
+  path: string;
+  status: 'staged' | 'modified' | 'added' | 'deleted';
+}
+
+export function getChangedFiles(repo: Repository): ChangedFile[] {
+  const files = new Map<string, ChangedFile>();
+
+  for (const change of repo.state.indexChanges) {
+    const path = change.uri.fsPath;
+    const status: ChangedFile['status'] = 'staged';
+    files.set(path, { path, status });
+  }
+
+  for (const change of repo.state.workingTreeChanges) {
+    const path = change.uri.fsPath;
+    if (!files.has(path)) {
+      const status: ChangedFile['status'] = 'modified';
+      files.set(path, { path, status });
+    }
+  }
+
+  return Array.from(files.values());
+}
+
 export function getCurrentRepo(): GitStatus | null {
   const api = getGitApi();
   if (!api || api.repositories.length === 0) {
@@ -68,6 +94,42 @@ export function getCurrentRepo(): GitStatus | null {
     currentBranch: headName,
     repo,
   };
+}
+
+export async function copyFilesToWorktree(
+  originalRoot: string,
+  worktreePath: string,
+  selectedFiles: string[],
+  repo: Repository,
+): Promise<boolean> {
+  try {
+    for (const filePath of selectedFiles) {
+      const relativePath = path.relative(originalRoot, filePath);
+      const targetPath = path.join(worktreePath, relativePath);
+
+      if (fs.existsSync(filePath)) {
+        // File exists — copy it (modified or added)
+        const targetDir = path.dirname(targetPath);
+        fs.mkdirSync(targetDir, { recursive: true });
+        fs.copyFileSync(filePath, targetPath);
+      } else {
+        // File doesn't exist — it was deleted, remove from worktree
+        if (fs.existsSync(targetPath)) {
+          fs.unlinkSync(targetPath);
+        }
+      }
+    }
+
+    // Stage all selected files in the worktree repo
+    if (selectedFiles.length > 0) {
+      await repo.add(selectedFiles);
+    }
+
+    return true;
+  } catch (e: any) {
+    vscode.window.showErrorMessage(`Failed to copy files to worktree: ${e.message}`);
+    return false;
+  }
 }
 
 export async function stageAllChanges(repo: Repository): Promise<boolean> {
@@ -89,7 +151,8 @@ export async function createWorktree(
   rootUri: vscode.Uri,
 ): Promise<string | null> {
   const worktreeDir = vscode.Uri.joinPath(rootUri, '.quick-pr', 'worktrees');
-  const worktreePath = vscode.Uri.joinPath(worktreeDir, branchName);
+  const safeName = branchName.replace(/\//g, '-');
+  const worktreePath = vscode.Uri.joinPath(worktreeDir, safeName);
 
   // Ensure .quick-pr/worktrees/ directory exists
   try {
