@@ -43,6 +43,7 @@ A VS Code extension that streamlines creating GitHub Pull Requests using a **wor
 - **Customizable rules**: Project-level PR title/body/commit message/branch name templates via `.quick-pr/` directory
 - **Auto-initialized config**: `.quick-pr/` directory with default settings is created automatically on first activation
 - **Full debug logging**: Complete AI prompts and raw responses are logged to `.quick-pr/log.log` for troubleshooting
+- **Loading indicators**: Buttons disable automatically on click and show progress text; VS Code notifications display real-time progress for each step
 
 ## Configuration
 
