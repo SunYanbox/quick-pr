@@ -46,7 +46,7 @@ export function initProjectConfig(workspaceRoot: string): void {
   // Create .gitignore inside .quick-pr-studio to exclude its contents from git tracking
   const gitignorePath = path.join(configDir, '.gitignore');
   if (!fs.existsSync(gitignorePath)) {
-    fs.writeFileSync(gitignorePath, '# Created by Quick PR\n*\n', 'utf-8');
+    fs.writeFileSync(gitignorePath, '# Created by Quick PR Studio\n*\n', 'utf-8');
     info('[projectConfig.initProjectConfig]', 'Created .gitignore for .quick-pr-studio', { gitignorePath });
   }
 }
