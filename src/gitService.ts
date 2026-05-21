@@ -33,15 +33,48 @@ interface RepositoryState {
 }
 
 function getGitApi(): GitExtensionAPI | null {
+  info('[gitService.getGitApi]', 'Attempting to get Git API');
   const gitExt = vscode.extensions.getExtension<GitAPI>('vscode.git');
-  if (!gitExt?.exports) {
+  if (!gitExt) {
+    const envContext: Record<string, string> = {};
+    // Log env vars that could affect git/gh detection
+    for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_CEILING_DIRECTORIES', 'GH_TOKEN', 'GITHUB_TOKEN', 'PATH']) {
+      if (process.env[key]) {
+        const val = key === 'PATH' ? process.env[key]!.slice(0, 300) + '...' : process.env[key]!;
+        envContext[key] = val;
+      }
+    }
     const msg = 'Built-in Git extension not found';
-    logError('[gitService.getGitApi]', msg, { extensionExists: !!gitExt, hasExports: !!gitExt?.exports });
+    logError('[gitService.getGitApi]', msg, {
+      extensionExists: !!gitExt,
+      ...envContext,
+    });
     vscode.window.showErrorMessage(msg);
     return null;
   }
+
+  if (!gitExt.isActive) {
+    info('[gitService.getGitApi]', 'Git extension is installed but not active — forcing activation');
+    try {
+      // Force activate the Git extension to avoid race conditions on restart
+      gitExt.activate();
+    } catch (activateError: unknown) {
+      const msg = activateError instanceof Error ? activateError.message : String(activateError);
+      logError('[gitService.getGitApi]', 'Failed to force-activate Git extension', {}, activateError);
+    }
+  } else {
+    info('[gitService.getGitApi]', 'Git extension is already active');
+  }
+
   try {
-    return gitExt.exports.getAPI(1);
+    const api = gitExt.exports.getAPI(1);
+    if (api) {
+      info('[gitService.getGitApi]', 'Git API obtained', {
+        repositoryCount: api.repositories?.length ?? 0,
+        repositoryRoots: api.repositories?.map((r: Repository) => r.rootUri.fsPath) ?? [],
+      });
+    }
+    return api;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     logError('[gitService.getGitApi]', 'Failed to get Git API (version mismatch?)', {}, e);
@@ -332,8 +365,19 @@ export async function getFileDiff(
 export function getCurrentRepo(): GitStatus | null {
   const api = getGitApi();
   if (!api || api.repositories.length === 0) {
+    const envContext: Record<string, string | undefined> = {};
+    for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_CEILING_DIRECTORIES', 'PATH']) {
+      envContext[key] = key === 'PATH'
+        ? (process.env.PATH || '').slice(0, 300)
+        : process.env[key];
+    }
     const msg = 'No Git repositories found in workspace';
-    logError('[gitService.getCurrentRepo]', msg, { apiAvailable: !!api, repoCount: api?.repositories?.length ?? 0 });
+    logError('[gitService.getCurrentRepo]', msg, {
+      apiAvailable: !!api,
+      repoCount: api?.repositories?.length ?? 0,
+      workspaceFolders: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
+      ...envContext,
+    });
     vscode.window.showErrorMessage(msg);
     return null;
   }
