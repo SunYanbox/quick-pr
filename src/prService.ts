@@ -1,48 +1,73 @@
 import * as vscode from 'vscode';
-import { spawn } from 'child_process';
-import { info, error as logError } from './logger';
+import { spawn, exec } from 'child_process';
+import { debug, info, error as logError } from './logger';
 
 export async function checkGhCli(): Promise<boolean> {
+  debug('[prService.checkGhCli]', 'Checking GitHub CLI availability');
+
   // Check if gh CLI is installed
   const installed = await new Promise<boolean>((resolve) => {
-    exec('gh --version', (error) => {
-      if (error) {
-        logError('[prService.checkGhCli]', 'GitHub CLI (gh) is not installed', {
-          code: (error as any)?.code,
-          message: error.message,
-        });
-        vscode.window.showErrorMessage(
-          'GitHub CLI (gh) is not installed. Install it from https://cli.github.com/',
-        );
-        resolve(false);
-      } else {
-        resolve(true);
-      }
-    });
+    try {
+      debug('[prService.checkGhCli]', 'Running: gh --version');
+      exec('gh --version', (error) => {
+        if (error) {
+          logError('[prService.checkGhCli]', 'GitHub CLI (gh) is not installed', {
+            code: (error as any)?.code,
+            message: error.message,
+          });
+          vscode.window.showErrorMessage(
+            'GitHub CLI (gh) is not installed. Install it from https://cli.github.com/',
+          );
+          resolve(false);
+        } else {
+          debug('[prService.checkGhCli]', 'gh --version succeeded');
+          resolve(true);
+        }
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const stack = e instanceof Error ? e.stack : '';
+      logError('[prService.checkGhCli]', `Unexpected error checking gh CLI: ${msg}`, {
+        errorName: e instanceof Error ? e.name : typeof e,
+        stack: stack?.slice(0, 500),
+      });
+      resolve(false);
+    }
   });
 
   if (!installed) return false;
 
   // Also check if gh is authenticated
   return new Promise((resolve) => {
-    exec('gh auth status', (authError: Error | null) => {
-      if (authError) {
-        const hint = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
-          ? 'Make sure your GH_TOKEN or GITHUB_TOKEN environment variable is valid and has not expired.'
-          : 'Run "gh auth login" to authenticate, or set the GH_TOKEN environment variable.';
-        logError('[prService.checkGhCli]', 'GitHub CLI is not authenticated', {
-          hint,
-          stderr: authError.message,
-        });
-        vscode.window.showErrorMessage(
-          `GitHub CLI (gh) is not authenticated. ${hint}`,
-        );
-        resolve(false);
-      } else {
-        info('[prService.checkGhCli]', 'GitHub CLI is installed and authenticated');
-        resolve(true);
-      }
-    });
+    try {
+      debug('[prService.checkGhCli]', 'Running: gh auth status');
+      exec('gh auth status', (authError: Error | null) => {
+        if (authError) {
+          const hint = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+            ? 'Make sure your GH_TOKEN or GITHUB_TOKEN environment variable is valid and has not expired.'
+            : 'Run "gh auth login" to authenticate, or set the GH_TOKEN environment variable.';
+          logError('[prService.checkGhCli]', 'GitHub CLI is not authenticated', {
+            hint,
+            stderr: authError.message,
+          });
+          vscode.window.showErrorMessage(
+            `GitHub CLI (gh) is not authenticated. ${hint}`,
+          );
+          resolve(false);
+        } else {
+          info('[prService.checkGhCli]', 'GitHub CLI is installed and authenticated');
+          resolve(true);
+        }
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const stack = e instanceof Error ? e.stack : '';
+      logError('[prService.checkGhCli]', `Unexpected error checking gh auth: ${msg}`, {
+        errorName: e instanceof Error ? e.name : typeof e,
+        stack: stack?.slice(0, 500),
+      });
+      resolve(false);
+    }
   });
 }
 
