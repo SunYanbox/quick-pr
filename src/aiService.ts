@@ -8,6 +8,11 @@ interface AiResponse {
   branchName: string;
 }
 
+interface PrDescriptionResponse {
+  title: string;
+  body: string;
+}
+
 function getConfig() {
   const config = vscode.workspace.getConfiguration('quick-pr-studio');
   return {
@@ -16,6 +21,221 @@ function getConfig() {
     baseUrl: config.get<string>('ai.baseUrl', ''),
     model: config.get<string>('ai.model', 'gpt-4o-mini'),
     promptTemplate: config.get<string>('ai.promptTemplate', ''),
+  };
+}
+
+async function callAiApi(userPrompt: string): Promise<Record<string, string> | null> {
+  const { enabled, apiKey, baseUrl, model, promptTemplate } = getConfig();
+
+  if (!enabled) {
+    info('[aiService]', 'AI generation disabled, skipping');
+    return null;
+  }
+  if (!apiKey) {
+    warn('[aiService]', 'AI enabled but no API key configured');
+    vscode.window.showWarningMessage(
+      'AI generation is enabled but no API key is configured (quick-pr-studio.ai.apiKey)',
+    );
+    return null;
+  }
+
+  const url = baseUrl
+    ? `${baseUrl.replace(/\/$/, '')}/chat/completions`
+    : 'https://api.openai.com/v1/chat/completions';
+
+  info('[aiService]', `\n---------- FULL PROMPT SENT TO AI ----------\nSystem:\n${promptTemplate || '(empty)'}\n\nUser:\n${userPrompt}\n--------------------------------------------`);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: promptTemplate },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      logError('[aiService]', 'AI API returned error', {
+        status: response.status,
+        statusText: response.statusText,
+        url,
+      });
+      vscode.window.showErrorMessage(`AI API error (${response.status}): ${errText}`);
+      return null;
+    }
+
+    const data = (await response.json()) as any;
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      logError('[aiService]', 'AI response missing content', {
+        responseSnippet: JSON.stringify(data).slice(0, 200),
+      });
+      vscode.window.showErrorMessage('AI response missing content');
+      return null;
+    }
+
+    info('[aiService]', `\n---------- AI RAW RESPONSE ----------\n${content}\n-------------------------------------`);
+    return JSON.parse(content) as Record<string, string>;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logError('[aiService]', 'AI request failed', { url }, e);
+    vscode.window.showErrorMessage(`AI request failed: ${msg}`);
+    return null;
+  }
+}
+
+export async function generateBranchName(
+  branchDescription: string,
+  branchNameRule: string = '',
+  recentCommits: string[] = [],
+): Promise<string | null> {
+  if (!branchDescription.trim()) {
+    return null;
+  }
+
+  const parts: string[] = [
+    'Generate a short, descriptive Git branch name from the user\'s description.',
+    'The branch name should use kebab-case, be concise (3-5 words max), and follow conventional branch naming.',
+    'ONLY use the user\'s description as source — do not fabricate or add unrelated details.',
+    '',
+    `User description: "${branchDescription}"`,
+  ];
+
+  if (branchNameRule) {
+    parts.push('');
+    parts.push('===== BRANCH NAME RULES =====');
+    parts.push(branchNameRule);
+  }
+
+  if (recentCommits.length > 0) {
+    parts.push('');
+    parts.push('===== RECENT COMMIT SUBJECTS (style reference only) =====');
+    parts.push(recentCommits.map((c, i) => `${i + 1}. ${c}`).join('\n'));
+  }
+
+  parts.push('');
+  parts.push('Respond ONLY with a JSON object: { "branchName": "..." }');
+
+  const result = await callAiApi(parts.join('\n'));
+  if (!result?.branchName) return null;
+
+  const sanitized = result.branchName.replace(/[\s\/]+/g, '-').toLowerCase();
+  info('[aiService.generateBranchName]', 'Branch name generated', { branchName: sanitized });
+  return sanitized;
+}
+
+export async function generateCommitMessage(
+  commitMsg: string,
+  filesDiff: string,
+  commitMessageRule: string = '',
+  recentCommits: string[] = [],
+): Promise<string | null> {
+  const parts: string[] = [
+    'Generate a conventional-commit style commit message for the given diff.',
+    'RULE: The DIFF is your ONLY source of content — describe what it actually changes, nothing else.',
+    'Return ONLY the commit subject line (first line, < 72 chars).',
+    'Use format: type(scope): description (e.g. "feat(auth): add login page").',
+    '',
+  ];
+
+  if (filesDiff) {
+    parts.push('===== DIFF =====');
+    parts.push(filesDiff);
+    parts.push('');
+  } else {
+    parts.push('(No diff provided — use the user draft if available)');
+    parts.push('');
+  }
+
+  if (commitMsg) {
+    parts.push(`User draft (use as reference): "${commitMsg}"`);
+    parts.push('');
+  }
+
+  if (commitMessageRule) {
+    parts.push('===== COMMIT MESSAGE RULES =====');
+    parts.push(commitMessageRule);
+    parts.push('');
+  }
+
+  if (recentCommits.length > 0) {
+    parts.push('===== RECENT COMMIT SUBJECTS (style reference only) =====');
+    parts.push(recentCommits.map((c, i) => `${i + 1}. ${c}`).join('\n'));
+    parts.push('');
+  }
+
+  parts.push('Respond ONLY with a JSON object: { "commitMsg": "..." }');
+
+  const result = await callAiApi(parts.join('\n'));
+  if (!result?.commitMsg) return null;
+
+  info('[aiService.generateCommitMessage]', 'Commit message generated');
+  return result.commitMsg;
+}
+
+export async function generatePrDescription(
+  prTitle: string,
+  prBody: string,
+  branchName: string,
+  filesDiff: string,
+  prTitleRule: string = '',
+  prBodyRule: string = '',
+  recentCommits: string[] = [],
+): Promise<PrDescriptionResponse | null> {
+  const parts: string[] = [
+    'Generate a pull request title and body describing the cumulative changes in the diff below.',
+    'RULE: The DIFF is your ONLY source of content — describe what it actually shows, nothing else.',
+    '',
+  ];
+
+  if (filesDiff) {
+    parts.push('===== DIFF (entire branch changes) =====');
+    parts.push(filesDiff);
+    parts.push('');
+  }
+
+  parts.push('===== CONTEXT =====');
+  parts.push(`Branch name: ${branchName}`);
+  if (prTitle) parts.push(`User draft title: "${prTitle}"`);
+  if (prBody) parts.push(`User draft body: "${prBody}"`);
+  parts.push('');
+
+  if (prTitleRule) {
+    parts.push('===== TITLE RULES =====');
+    parts.push(prTitleRule);
+    parts.push('');
+  }
+  if (prBodyRule) {
+    parts.push('===== BODY RULES =====');
+    parts.push(prBodyRule);
+    parts.push('');
+  }
+
+  if (recentCommits.length > 0) {
+    parts.push('===== RECENT COMMIT SUBJECTS (style reference only) =====');
+    parts.push(recentCommits.map((c, i) => `${i + 1}. ${c}`).join('\n'));
+    parts.push('');
+  }
+
+  parts.push('Respond ONLY with a JSON object: { "title": "...", "body": "..." }');
+
+  const result = await callAiApi(parts.join('\n'));
+  if (!result) return null;
+
+  info('[aiService.generatePrDescription]', 'PR description generated');
+  return {
+    title: result.title || prTitle,
+    body: result.body || prBody,
   };
 }
 

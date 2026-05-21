@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
-import { collectInputs } from './inputService';
+import { collectInputs, collectStepByStepInputs, collectAddCommitInputs, collectFinalizePrInputs } from './inputService';
 import {
   getCurrentRepo,
   getChangedFiles,
+  filterFilesCommittedToWorktree,
   createWorktree,
-  commitAndPush,
+  commitOnly,
+  pushWithFallbacks,
   copyFilesToWorktree,
   deleteWorktree,
   openPrUrl,
@@ -12,11 +14,20 @@ import {
 import { checkGhCli, createPr } from './prService';
 import { initLogger, info, error as logError } from './logger';
 import { initProjectConfig } from './projectConfig';
+import { WorktreeTreeDataProvider } from './worktreeTreeView';
+import { openWorktreeWebview } from './worktreeWebview';
+import {
+  addWorktree,
+  updateWorktree,
+  removeWorktree,
+  getActiveWorktree,
+  getWorktree,
+  WorktreeInfo,
+} from './worktreeManager';
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Quick PR Studio extension activated');
 
-  // Initialize project config files on activation
   const workspaceRoot =
     vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
   if (workspaceRoot) {
@@ -25,30 +36,36 @@ export function activate(context: vscode.ExtensionContext) {
     info('[extension]', 'Project config initialized on activation', { workspaceRoot });
   }
 
-  const disposable = vscode.commands.registerCommand(
+  const treeDataProvider = new WorktreeTreeDataProvider(
+    workspaceRoot || '',
+  );
+  const treeView = vscode.window.createTreeView('quick-pr-studio-worktreeList', {
+    treeDataProvider,
+    showCollapseAll: false,
+  });
+  context.subscriptions.push(treeView);
+
+  const createPrDisposable = vscode.commands.registerCommand(
     'quick-pr-studio.createPr',
     async () => {
-      const workspaceRoot =
+      const wsRoot =
         vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
-      if (!workspaceRoot) {
+      if (!wsRoot) {
         vscode.window.showErrorMessage('No workspace folder open');
         return;
       }
 
-      initLogger(workspaceRoot);
-      info('[extension]', 'Starting PR creation flow', { workspaceRoot });
+      initLogger(wsRoot);
+      info('[extension]', 'Starting PR creation flow', { workspaceRoot: wsRoot });
 
-      // Step 2: Check gh CLI
       const ghAvailable = await checkGhCli();
       if (!ghAvailable) return;
 
-      // Step 3: Get current repo status
       const gitStatus = getCurrentRepo();
       if (!gitStatus) return;
 
       info('[extension]', 'Git status retrieved', { currentBranch: gitStatus.currentBranch });
 
-      // Step 4: Get changed files for user selection
       const changedFiles = getChangedFiles(gitStatus.repo);
       if (changedFiles.length === 0) {
         vscode.window.showWarningMessage('No changes detected in the repository.');
@@ -57,11 +74,10 @@ export function activate(context: vscode.ExtensionContext) {
 
       info('[extension]', 'Changed files detected', { fileCount: changedFiles.length });
 
-      // Step 5: Collect inputs with file selection
-      const inputs = await collectInputs(workspaceRoot, changedFiles, gitStatus.currentBranch);
+      const inputs = await collectInputs(wsRoot, changedFiles, gitStatus.currentBranch);
       if (!inputs) {
         info('[extension]', 'User cancelled input collection');
-        return; // user cancelled
+        return;
       }
 
       const { commitMsg, branchName, prTitle, prBody, prBase, selectedFiles } = inputs;
@@ -74,7 +90,6 @@ export function activate(context: vscode.ExtensionContext) {
         prTitlePreview: prTitle.slice(0, 80),
       });
 
-      // Steps 6-8: Create worktree, copy files, commit & push, create PR
       const prResult = await vscode.window.withProgress<{ prUrl: string; worktreePath: string } | null>(
         {
           location: vscode.ProgressLocation.Notification,
@@ -83,14 +98,12 @@ export function activate(context: vscode.ExtensionContext) {
         },
         async (progress) => {
           try {
-            // Step 6: Create worktree
             progress.report({ message: 'Creating worktree...' });
             const wtPath = await createWorktree(gitStatus.repo, branchName);
             if (!wtPath) return null;
 
             info('[extension]', 'Worktree created', { worktreePath: wtPath });
 
-            // Copy selected files from original repo to worktree
             progress.report({ message: 'Copying files...' });
             const filesCopied = await copyFilesToWorktree(
               gitStatus.repo.rootUri.fsPath,
@@ -101,14 +114,15 @@ export function activate(context: vscode.ExtensionContext) {
 
             info('[extension]', 'Files copied to worktree', { fileCount: selectedFiles.length });
 
-            // Commit and push
             progress.report({ message: 'Committing and pushing...' });
-            const success = await commitAndPush(wtPath, commitMsg, branchName);
-            if (!success) return null;
+            const committed = await commitOnly(wtPath, commitMsg);
+            if (!committed) return null;
+
+            const pushed = await pushWithFallbacks(wtPath, branchName);
+            if (!pushed) return null;
 
             info('[extension]', 'Commit and push successful', { branchName });
 
-            // Create PR
             progress.report({ message: 'Creating PR...' });
             const url = await createPr({
               title: prTitle,
@@ -136,10 +150,8 @@ export function activate(context: vscode.ExtensionContext) {
 
       if (!prResult) return;
 
-      // Open PR URL
       await openPrUrl(prResult.prUrl);
 
-      // Cleanup worktree
       const config = vscode.workspace.getConfiguration('quick-pr-studio');
       const autoCleanup = config.get<boolean>(
         'cleanupWorktreeAfterPr',
@@ -162,10 +174,493 @@ export function activate(context: vscode.ExtensionContext) {
           info('[extension]', 'Worktree deleted by user choice', { worktreePath: prResult.worktreePath });
         }
       }
+      treeDataProvider.refresh();
     },
   );
+  context.subscriptions.push(createPrDisposable);
 
-  context.subscriptions.push(disposable);
+  const startStepByStepDisposable = vscode.commands.registerCommand(
+    'quick-pr-studio.startStepByStep',
+    async () => {
+      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+      if (!wsRoot) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+      }
+
+      initLogger(wsRoot);
+      info('[extension.startStepByStep]', 'Starting step-by-step workflow');
+
+      const ghAvailable = await checkGhCli();
+      if (!ghAvailable) return;
+
+      const gitStatus = getCurrentRepo();
+      if (!gitStatus) return;
+
+      const inputs = await collectStepByStepInputs(wsRoot, gitStatus.currentBranch);
+      if (!inputs) {
+        info('[extension.startStepByStep]', 'User cancelled');
+        return;
+      }
+
+      const { branchName, prBase } = inputs;
+      const commitish = gitStatus.repo.state.HEAD?.name || 'HEAD';
+
+      const wtPath = await vscode.window.withProgress<string | null>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Quick PR Studio',
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ message: 'Creating worktree...' });
+          return createWorktree(gitStatus.repo, branchName);
+        },
+      );
+
+      if (!wtPath) return;
+
+      const safeId = branchName.replace(/\//g, '-');
+
+      const worktreeInfo: WorktreeInfo = {
+        id: safeId,
+        branchName,
+        worktreePath: wtPath,
+        baseCommitish: commitish,
+        prBase,
+        status: 'created',
+        commitCount: 0,
+        lastCommitMsg: '',
+        createdAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+      };
+      addWorktree(wsRoot, worktreeInfo);
+      treeDataProvider.refresh();
+
+      info('[extension.startStepByStep]', 'Worktree created (step-by-step)', {
+        branchName,
+        worktreePath: wtPath,
+        baseCommitish: commitish,
+      });
+
+      vscode.window.showInformationMessage(
+        `Worktree "${branchName}" created. Use "Add Commit" in the sidebar to add your first commit.`,
+      );
+    },
+  );
+  context.subscriptions.push(startStepByStepDisposable);
+
+  const addCommitDisposable = vscode.commands.registerCommand(
+    'quick-pr-studio.addCommit',
+    async (worktreeId?: string) => {
+      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+      if (!wsRoot) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+      }
+
+      initLogger(wsRoot);
+
+      const active = worktreeId
+        ? getWorktree(wsRoot, worktreeId)
+        : getActiveWorktree(wsRoot);
+      if (!active) {
+        vscode.window.showWarningMessage(
+          'No worktree found. Create one first with "Start Step-by-Step PR" in the sidebar.',
+        );
+        return;
+      }
+
+      const gitStatus = getCurrentRepo();
+      if (!gitStatus) return;
+
+      const allChangedFiles = getChangedFiles(gitStatus.repo);
+      if (allChangedFiles.length === 0) {
+        vscode.window.showWarningMessage('No changes detected in the repository.');
+        return;
+      }
+
+      const changedFiles = await filterFilesCommittedToWorktree(
+        allChangedFiles,
+        gitStatus.repo.rootUri.fsPath,
+        active.branchName,
+      );
+      if (changedFiles.length === 0) {
+        vscode.window.showWarningMessage('No new changes beyond what is already committed to the worktree.');
+        return;
+      }
+
+      const inputs = await collectAddCommitInputs(wsRoot, changedFiles, active.branchName);
+      if (!inputs) {
+        info('[extension.addCommit]', 'User cancelled commit');
+        return;
+      }
+
+      const { commitMsg, selectedFiles } = inputs;
+
+      const success = await vscode.window.withProgress<boolean>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Quick PR Studio',
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ message: 'Copying files...' });
+          const copied = await copyFilesToWorktree(
+            gitStatus.repo.rootUri.fsPath,
+            active.worktreePath,
+            selectedFiles,
+          );
+          if (!copied) return false;
+
+          progress.report({ message: 'Committing...' });
+          const committed = await commitOnly(active.worktreePath, commitMsg);
+          if (!committed) return false;
+
+          return true;
+        },
+      );
+
+      if (success) {
+        updateWorktree(wsRoot, active.id, {
+          status: 'committed',
+          commitCount: active.commitCount + 1,
+          lastCommitMsg: commitMsg,
+          lastActivityAt: new Date().toISOString(),
+        });
+        treeDataProvider.refresh();
+        vscode.window.showInformationMessage(`Commit added to "${active.branchName}" (${active.commitCount + 1} total)`);
+      }
+    },
+  );
+  context.subscriptions.push(addCommitDisposable);
+
+  const finalizePrDisposable = vscode.commands.registerCommand(
+    'quick-pr-studio.finalizePr',
+    async (worktreeId?: string) => {
+      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+      if (!wsRoot) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+      }
+
+      initLogger(wsRoot);
+
+      const active = worktreeId
+        ? getWorktree(wsRoot, worktreeId)
+        : getActiveWorktree(wsRoot);
+      if (!active) {
+        vscode.window.showWarningMessage('No active worktree to finalize.');
+        return;
+      }
+
+      if (active.commitCount === 0) {
+        vscode.window.showWarningMessage('No commits in this worktree. Add at least one commit first.');
+        return;
+      }
+
+      const inputs = await collectFinalizePrInputs(
+        wsRoot,
+        active.branchName,
+        active.prBase,
+        active.commitCount,
+        active.worktreePath,
+        active.baseCommitish,
+      );
+      if (!inputs) {
+        info('[extension.finalizePr]', 'User cancelled finalization');
+        return;
+      }
+
+      const { prTitle, prBody } = inputs;
+
+      const result = await vscode.window.withProgress<string | null>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Quick PR Studio',
+          cancellable: false,
+        },
+        async (progress) => {
+          try {
+            progress.report({ message: 'Pushing...' });
+            updateWorktree(wsRoot, active.id, { status: 'pushing' });
+
+            const pushed = await pushWithFallbacks(active.worktreePath, active.branchName);
+            if (!pushed) {
+              updateWorktree(wsRoot, active.id, {
+                status: 'error',
+                errorMessage: 'Push failed — check network or remote permissions',
+                lastActivityAt: new Date().toISOString(),
+              });
+              return null;
+            }
+
+            progress.report({ message: 'Creating PR...' });
+            updateWorktree(wsRoot, active.id, { status: 'pr_creating' });
+
+            const url = await createPr({
+              title: prTitle,
+              body: prBody,
+              base: active.prBase,
+              head: active.branchName,
+              worktreePath: active.worktreePath,
+            });
+            if (!url) {
+              updateWorktree(wsRoot, active.id, {
+                status: 'error',
+                errorMessage: 'PR creation failed — check gh CLI authentication',
+                lastActivityAt: new Date().toISOString(),
+              });
+              return null;
+            }
+
+            updateWorktree(wsRoot, active.id, {
+              status: 'pr_created',
+              lastActivityAt: new Date().toISOString(),
+            });
+
+            return url;
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            updateWorktree(wsRoot, active.id, {
+              status: 'error',
+              errorMessage: msg,
+              lastActivityAt: new Date().toISOString(),
+            });
+            logError('[extension.finalizePr]', 'Finalize failed', { branchName: active.branchName }, e);
+            return null;
+          }
+        },
+      );
+
+      treeDataProvider.refresh();
+
+      if (result) {
+        await openPrUrl(result);
+
+        const config = vscode.workspace.getConfiguration('quick-pr-studio');
+        const autoCleanup = config.get<boolean>('autoCleanupWorktree', false);
+        if (autoCleanup) {
+          await deleteWorktree(wsRoot, active.worktreePath);
+          removeWorktree(wsRoot, active.id);
+          treeDataProvider.refresh();
+          info('[extension.finalizePr]', 'Worktree auto-cleaned');
+        }
+      }
+    },
+  );
+  context.subscriptions.push(finalizePrDisposable);
+
+  const openWorktreeDisposable = vscode.commands.registerCommand(
+    'quick-pr-studio.openWorktree',
+    async (worktreeId?: string) => {
+      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+      if (!wsRoot) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+      }
+
+      initLogger(wsRoot);
+
+      const id = worktreeId || getActiveWorktree(wsRoot)?.id;
+      if (!id) {
+        vscode.window.showWarningMessage('No worktree selected');
+        return;
+      }
+
+      const info = getWorktree(wsRoot, id);
+      if (!info) {
+        vscode.window.showErrorMessage('Worktree not found');
+        return;
+      }
+
+      await openWorktreeWebview(
+        wsRoot,
+        id,
+        context,
+        async (wtInfo, commitMsg, selectedFiles) => {
+          const copied = await copyFilesToWorktree(wsRoot, wtInfo.worktreePath, selectedFiles);
+          if (!copied) return false;
+          const committed = await commitOnly(wtInfo.worktreePath, commitMsg);
+          if (committed) {
+            updateWorktree(wsRoot, id, {
+              status: wtInfo.commitCount === 0 ? 'committed' : wtInfo.status,
+              commitCount: wtInfo.commitCount + 1,
+              lastCommitMsg: commitMsg,
+              lastActivityAt: new Date().toISOString(),
+            });
+            treeDataProvider.refresh();
+          }
+          return committed;
+        },
+        async (wtInfo) => {
+          vscode.commands.executeCommand('quick-pr-studio.finalizePr', wtInfo.id);
+        },
+        async (wtInfo) => {
+          vscode.commands.executeCommand('quick-pr-studio.retryWorktree', wtInfo.id);
+        },
+        async (wtInfo) => {
+          const gitStatus = getCurrentRepo();
+          if (gitStatus) {
+            await deleteWorktree(gitStatus.repo.rootUri.fsPath, wtInfo.worktreePath);
+          }
+          removeWorktree(wsRoot, id);
+          treeDataProvider.refresh();
+          vscode.window.showInformationMessage(`Worktree "${wtInfo.branchName}" deleted`);
+        },
+      );
+    },
+  );
+  context.subscriptions.push(openWorktreeDisposable);
+
+  const retryWorktreeDisposable = vscode.commands.registerCommand(
+    'quick-pr-studio.retryWorktree',
+    async (worktreeId?: string) => {
+      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+      if (!wsRoot) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+      }
+
+      initLogger(wsRoot);
+
+      const active = worktreeId
+        ? getWorktree(wsRoot, worktreeId)
+        : getActiveWorktree(wsRoot);
+      if (!active || active.status !== 'error') {
+        vscode.window.showWarningMessage('No failed worktree to retry.');
+        return;
+      }
+
+      const result = await vscode.window.withProgress<string | null>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Quick PR Studio',
+          cancellable: false,
+        },
+        async (progress) => {
+          try {
+            const prevStatus = active.errorMessage?.includes('PR creation') ? 'pr_creating' : 'committed';
+
+            if (prevStatus === 'committed') {
+              progress.report({ message: 'Retrying push...' });
+              updateWorktree(wsRoot, active.id, { status: 'pushing', errorMessage: undefined });
+
+              const pushed = await pushWithFallbacks(active.worktreePath, active.branchName);
+              if (!pushed) {
+                updateWorktree(wsRoot, active.id, {
+                  status: 'error',
+                  errorMessage: 'Push failed on retry',
+                  lastActivityAt: new Date().toISOString(),
+                });
+                return null;
+              }
+            }
+
+            progress.report({ message: 'Creating PR...' });
+            updateWorktree(wsRoot, active.id, { status: 'pr_creating', errorMessage: undefined });
+
+            const inputs = await collectFinalizePrInputs(
+              wsRoot,
+              active.branchName,
+              active.prBase,
+              active.commitCount,
+              active.worktreePath,
+              active.baseCommitish,
+            );
+            if (!inputs) return null;
+
+            const url = await createPr({
+              title: inputs.prTitle,
+              body: inputs.prBody,
+              base: active.prBase,
+              head: active.branchName,
+              worktreePath: active.worktreePath,
+            });
+            if (!url) {
+              updateWorktree(wsRoot, active.id, {
+                status: 'error',
+                errorMessage: 'PR creation failed on retry',
+                lastActivityAt: new Date().toISOString(),
+              });
+              return null;
+            }
+
+            updateWorktree(wsRoot, active.id, {
+              status: 'pr_created',
+              errorMessage: undefined,
+              lastActivityAt: new Date().toISOString(),
+            });
+
+            return url;
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            updateWorktree(wsRoot, active.id, {
+              status: 'error',
+              errorMessage: msg,
+              lastActivityAt: new Date().toISOString(),
+            });
+            return null;
+          }
+        },
+      );
+
+      treeDataProvider.refresh();
+
+      if (result) {
+        await openPrUrl(result);
+      }
+    },
+  );
+  context.subscriptions.push(retryWorktreeDisposable);
+
+  const cleanupWorktreeDisposable = vscode.commands.registerCommand(
+    'quick-pr-studio.cleanupWorktree',
+    async (worktreeId?: string) => {
+      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+      if (!wsRoot) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+      }
+
+      initLogger(wsRoot);
+
+      const active = worktreeId
+        ? getWorktree(wsRoot, worktreeId)
+        : getActiveWorktree(wsRoot);
+      if (!active) {
+        vscode.window.showWarningMessage('No active worktree to clean up.');
+        return;
+      }
+
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete worktree "${active.branchName}"? This will remove the worktree directory and its branch.`,
+        { modal: true },
+        'Delete',
+      );
+      if (confirm !== 'Delete') return;
+
+      const gitStatus = getCurrentRepo();
+      let deleted = true;
+      if (gitStatus) {
+        deleted = await deleteWorktree(gitStatus.repo.rootUri.fsPath, active.worktreePath);
+      }
+      if (deleted) {
+        removeWorktree(wsRoot, active.id);
+        treeDataProvider.refresh();
+        vscode.window.showInformationMessage(`Worktree "${active.branchName}" cleaned up`);
+      }
+    },
+  );
+  context.subscriptions.push(cleanupWorktreeDisposable);
+
+  const refreshWorktreesDisposable = vscode.commands.registerCommand(
+    'quick-pr-studio.refreshWorktrees',
+    () => {
+      treeDataProvider.refresh();
+    },
+  );
+  context.subscriptions.push(refreshWorktreesDisposable);
 }
 
 export function deactivate() {}
