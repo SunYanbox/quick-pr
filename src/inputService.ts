@@ -525,8 +525,11 @@ export interface FinalizePrInputs {
   prBody: string;
 }
 
-function getStepByStepHtml(projectConfig: { settings: { defaultBaseBranch: string } }): string {
-  const defaultBase = projectConfig.settings.defaultBaseBranch;
+function getStepByStepHtml(
+  projectConfig: { settings: { defaultBaseBranch: string } },
+  currentBranch: string,
+): string {
+  const defaultBase = currentBranch || projectConfig.settings.defaultBaseBranch;
   return /* html */ `
 <!DOCTYPE html>
 <html lang="en">
@@ -1098,6 +1101,7 @@ function getFinalizePrHtml(
 
 export async function collectStepByStepInputs(
   workspaceRoot: string,
+  currentBranch: string,
 ): Promise<StepByStepInputs | null> {
   const projectConfig = loadProjectConfig(workspaceRoot);
 
@@ -1109,7 +1113,7 @@ export async function collectStepByStepInputs(
       { enableScripts: true, localResourceRoots: [], retainContextWhenHidden: true },
     );
 
-    panel.webview.html = getStepByStepHtml(projectConfig);
+    panel.webview.html = getStepByStepHtml(projectConfig, currentBranch);
 
     let resolved = false;
 

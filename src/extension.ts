@@ -196,7 +196,7 @@ export function activate(context: vscode.ExtensionContext) {
       const gitStatus = getCurrentRepo();
       if (!gitStatus) return;
 
-      const inputs = await collectStepByStepInputs(wsRoot);
+      const inputs = await collectStepByStepInputs(wsRoot, gitStatus.currentBranch);
       if (!inputs) {
         info('[extension.startStepByStep]', 'User cancelled');
         return;
