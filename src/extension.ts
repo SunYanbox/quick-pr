@@ -28,12 +28,26 @@ import {
 export function activate(context: vscode.ExtensionContext) {
   console.log('Quick PR Studio extension activated');
 
+  // Capture environment info for diagnosing restart / GitHub Desktop launch issues
+  const envContext: Record<string, string | undefined> = {};
+  for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_CEILING_DIRECTORIES', 'GH_TOKEN', 'GITHUB_TOKEN']) {
+    envContext[key] = process.env[key];
+  }
+  // Truncate PATH for readability
+  envContext['PATH'] = (process.env.PATH || '').slice(0, 200);
+
   const workspaceRoot =
     vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
   if (workspaceRoot) {
     initProjectConfig(workspaceRoot);
     initLogger(workspaceRoot);
-    info('[extension]', 'Project config initialized on activation', { workspaceRoot });
+    info('[extension]', 'Project config initialized on activation', {
+      workspaceRoot,
+      workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
+      ...envContext,
+    });
+  } else {
+    console.log('Quick PR Studio: No workspace folder open on activation', envContext);
   }
 
   const treeDataProvider = new WorktreeTreeDataProvider(
