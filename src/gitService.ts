@@ -172,6 +172,20 @@ export async function filterFilesCommittedToWorktree(
   return result;
 }
 
+export interface DiffLinePair {
+  leftLineNum: number | null;
+  leftContent: string | null;
+  rightLineNum: number | null;
+  rightContent: string | null;
+  type: 'context' | 'addition' | 'deletion' | 'modification';
+}
+
+export interface DetailedFileStatus {
+  path: string;
+  status: 'staged' | 'added' | 'modified' | 'deleted';
+}
+}
+
 export function getChangedFiles(repo: Repository): ChangedFile[] {
   const files = new Map<string, ChangedFile>();
 
@@ -190,6 +204,141 @@ export function getChangedFiles(repo: Repository): ChangedFile[] {
   }
 
   return Array.from(files.values());
+}
+
+async function fileExistsInGit(
+  repoPath: string,
+  relativePath: string,
+  ref: string,
+): Promise<boolean> {
+  try {
+    await execAsync(
+      `git show "${ref}:${relativePath}"`,
+      { cwd: repoPath, timeout: 5000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Determine detailed file status (added/modified/deleted) beyond staged/modified. */
+export async function getDetailedFileStatus(
+  repoPath: string,
+  filePath: string,
+): Promise<'staged' | 'added' | 'modified' | 'deleted'> {
+  const relativePath = path.relative(repoPath, filePath).replace(/\\/g, '/');
+  const existsOnDisk = fs.existsSync(filePath);
+  const existsInHead = await fileExistsInGit(repoPath, relativePath, 'HEAD');
+  if (existsOnDisk && !existsInHead) return 'added';
+  if (!existsOnDisk && existsInHead) return 'deleted';
+  return 'modified';
+}
+
+/** Parse git unified diff text into structured line-pair data for side-by-side rendering. */
+export function parseUnifiedDiff(diffText: string): DiffLinePair[] {
+  if (!diffText.trim()) return [];
+  const lines = diffText.split('\n');
+  const result: DiffLinePair[] = [];
+  let oldLineNum: number | null = null;
+  let newLineNum: number | null = null;
+  let delLines: string[] = [];
+  let addLines: string[] = [];
+  function flushHunk() {
+    const maxLen = Math.max(delLines.length, addLines.length);
+    for (let i = 0; i < maxLen; i++) {
+      const del = i < delLines.length ? delLines[i] : null;
+      const add = i < addLines.length ? addLines[i] : null;
+      let type: DiffLinePair['type'] = 'context';
+      if (del && add) type = 'modification';
+      else if (del) type = 'deletion';
+      else if (add) type = 'addition';
+      result.push({
+        leftLineNum: del !== null ? oldLineNum : null,
+        leftContent: del,
+        rightLineNum: add !== null ? newLineNum : null,
+        rightContent: add,
+        type,
+      });
+      if (del !== null) oldLineNum = oldLineNum !== null ? oldLineNum + 1 : null;
+      if (add !== null) newLineNum = newLineNum !== null ? newLineNum + 1 : null;
+    }
+    delLines = [];
+    addLines = [];
+  }
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      flushHunk();
+      const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (match) {
+        oldLineNum = parseInt(match[1], 10);
+        newLineNum = parseInt(match[2], 10);
+      }
+      continue;
+    }
+    if (line.startsWith('diff --git') || line.startsWith('index ') ||
+        line.startsWith('--- ') || line.startsWith('+++ ') ||
+        line.startsWith('new file') || line.startsWith('deleted file')) {
+      continue;
+    }
+    if (line.startsWith('-')) {
+      delLines.push(line.substring(1));
+    } else if (line.startsWith('+')) {
+      addLines.push(line.substring(1));
+    } else if (line.startsWith(' ')) {
+      flushHunk();
+      const content = line.substring(1);
+      result.push({
+        leftLineNum: oldLineNum,
+        leftContent: content,
+        rightLineNum: newLineNum,
+        rightContent: content,
+        type: 'context',
+      });
+      if (oldLineNum !== null) oldLineNum++;
+      if (newLineNum !== null) newLineNum++;
+    }
+  }
+  flushHunk();
+  return result;
+}
+
+/** Get unified diff for a single file and return structured line pairs. */
+export async function getFileDiff(
+  repoPath: string,
+  filePath: string,
+): Promise<DiffLinePair[]> {
+  const relativePath = path.relative(repoPath, filePath).replace(/\\/g, '/');
+  try {
+    const { stdout } = await execAsync(
+      `git diff HEAD -- "${relativePath}"`,
+      { cwd: repoPath, timeout: 30000, maxBuffer: 1024 * 1024 },
+    );
+    if (!stdout.trim()) {
+      const { stdout: stagedDiff } = await execAsync(
+        `git diff --cached HEAD -- "${relativePath}"`,
+        { cwd: repoPath, timeout: 30000, maxBuffer: 1024 * 1024 },
+      );
+      if (stagedDiff.trim()) {
+        return parseUnifiedDiff(stagedDiff);
+      }
+      const fullPath = path.join(repoPath, relativePath);
+      if (fs.existsSync(fullPath)) {
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        return content.split('\n').map((line, i) => ({
+          leftLineNum: null,
+          leftContent: null,
+          rightLineNum: i + 1,
+          rightContent: line,
+          type: 'addition' as const,
+        }));
+      }
+      return [];
+    }
+    return parseUnifiedDiff(stdout);
+  } catch (e) {
+    return [];
+  }
 }
 
 export function getCurrentRepo(): GitStatus | null {
