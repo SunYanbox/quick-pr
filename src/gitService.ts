@@ -128,19 +128,16 @@ export async function copyFilesToWorktree(
       const targetPath = path.join(worktreePath, relativePath);
 
       if (fs.existsSync(filePath)) {
-        // File exists — copy it (modified or added)
         const targetDir = path.dirname(targetPath);
         fs.mkdirSync(targetDir, { recursive: true });
         fs.copyFileSync(filePath, targetPath);
       } else {
-        // File doesn't exist — it was deleted, remove from worktree
         if (fs.existsSync(targetPath)) {
           fs.unlinkSync(targetPath);
         }
       }
     }
 
-    // Stage all files in the worktree using native git
     if (selectedFiles.length > 0) {
       await execAsync('git add -A', { cwd: worktreePath, timeout: 30000 });
     }
@@ -210,12 +207,10 @@ export async function createWorktree(
   });
 
   try {
-    // Ensure directory exists
     if (!fs.existsSync(worktreeDir)) {
       fs.mkdirSync(worktreeDir, { recursive: true });
     }
 
-    // Try using VSCode Git API first
     try {
       await repo.createWorktree(worktreePath, {
         commitish: commitish,
@@ -231,12 +226,10 @@ export async function createWorktree(
         branchName,
       });
 
-      // Clean up stale worktree directory and git registration from previous failed runs
       if (fs.existsSync(worktreePath)) {
         info('[gitService.createWorktree]', 'Removing stale worktree directory', { worktreePath });
         fs.rmSync(worktreePath, { recursive: true, force: true });
       }
-      // Prune stale worktree registrations in .git/worktrees/
       await execAsync('git worktree prune', { cwd: rootPath, timeout: 10000 });
       info('[gitService.createWorktree]', 'Stale worktree registrations pruned');
 
@@ -259,7 +252,6 @@ export async function createWorktree(
         return worktreePath;
       }
 
-      // Branch doesn't exist — normal flow
       const command = `git worktree add -b "${branchName}" "${worktreePath}" "${commitish}"`;
       info('[gitService.createWorktree]', 'Executing native git command', { command });
 
@@ -288,10 +280,6 @@ export async function createWorktree(
   }
 }
 
-/**
- * Convert an HTTPS remote URL to its SSH equivalent.
- * e.g. https://github.com/owner/repo.git -> git@github.com:owner/repo.git
- */
 function httpsToSshUrl(httpsUrl: string): string | null {
   const match = /^https:\/\/([^\/]+)\/(.+?)(?:\.git)?$/.exec(httpsUrl);
   if (!match) return null;
@@ -299,10 +287,6 @@ function httpsToSshUrl(httpsUrl: string): string | null {
   return `git@${host}:${path}.git`;
 }
 
-/**
- * Detect proxy configuration from environment variables or git config.
- * Priority: HTTPS_PROXY env > HTTP_PROXY env > git http.proxy config.
- */
 async function detectProxy(cwd: string): Promise<string | null> {
   const envProxy = process.env.HTTPS_PROXY || process.env.https_proxy ||
                    process.env.HTTP_PROXY || process.env.http_proxy ||
@@ -320,6 +304,155 @@ async function detectProxy(cwd: string): Promise<string | null> {
   return null;
 }
 
+export async function checkRemoteBranch(worktreePath: string, branchName: string): Promise<boolean> {
+  try {
+    await execAsync(`git ls-remote --heads origin "${branchName}"`, {
+      cwd: worktreePath,
+      timeout: 15000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function commitOnly(
+  worktreePath: string,
+  commitMsg: string,
+): Promise<boolean> {
+  info('[gitService.commitOnly]', 'Starting commit', {
+    worktreePath,
+    commitMsgPreview: commitMsg.slice(0, 80),
+  });
+
+  try {
+    await execAsync('git add -A', { cwd: worktreePath, timeout: 30000 });
+
+    const { stdout: statusOut } = await execAsync('git status --porcelain', {
+      cwd: worktreePath,
+      timeout: 10000,
+    });
+
+    if (!statusOut.trim()) {
+      info('[gitService.commitOnly]', 'No changes to commit');
+      return true;
+    }
+
+    const msgFile = path.join(worktreePath, '.quick-pr-studio-commit-msg');
+    fs.writeFileSync(msgFile, commitMsg, 'utf-8');
+
+    try {
+      await execAsync(`git commit -F "${msgFile}"`, { cwd: worktreePath, timeout: 30000 });
+    } finally {
+      if (fs.existsSync(msgFile)) {
+        fs.unlinkSync(msgFile);
+      }
+    }
+
+    info('[gitService.commitOnly]', 'Commit successful');
+    return true;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logError('[gitService.commitOnly]', 'Commit failed', {
+      worktreePath,
+      commitMsgPreview: commitMsg.slice(0, 80),
+    }, e);
+    vscode.window.showErrorMessage(`Git commit failed: ${msg}`);
+    return false;
+  }
+}
+
+export async function pushWithFallbacks(
+  worktreePath: string,
+  branchName: string,
+): Promise<boolean> {
+  info('[gitService.pushWithFallbacks]', 'Starting push', {
+    worktreePath,
+    branchName,
+  });
+
+  try {
+    const remoteExists = await checkRemoteBranch(worktreePath, branchName);
+
+    const pushArgs = remoteExists
+      ? `git push origin "${branchName}"`
+      : `git push -u origin "${branchName}"`;
+
+    try {
+      await execAsync(pushArgs, { cwd: worktreePath, timeout: 60000 });
+      info('[gitService.pushWithFallbacks]', 'Push successful');
+      return true;
+    } catch (pushError: unknown) {
+      const pushMsg = pushError instanceof Error ? pushError.message : String(pushError);
+      warn('[gitService.pushWithFallbacks]', 'Initial push failed, attempting fallbacks', {
+        branchName,
+        error: pushMsg,
+      });
+
+      const { stdout: remoteUrl } = await execAsync('git remote get-url origin', {
+        cwd: worktreePath,
+        timeout: 10000,
+      }).catch(() => ({ stdout: '' }));
+
+      const sshUrl = remoteUrl.trim() && httpsToSshUrl(remoteUrl.trim());
+
+      if (sshUrl) {
+        try {
+          info('[gitService.pushWithFallbacks]', 'Retrying push via SSH', { sshUrl });
+          if (remoteExists) {
+            await execAsync(`git push "${sshUrl}" "${branchName}"`, {
+              cwd: worktreePath,
+              timeout: 60000,
+            });
+          } else {
+            await execAsync(`git push -u "${sshUrl}" "${branchName}"`, {
+              cwd: worktreePath,
+              timeout: 60000,
+            });
+          }
+          info('[gitService.pushWithFallbacks]', 'SSH push successful', { branchName });
+
+          await execAsync(`git remote set-url origin "${sshUrl}"`, {
+            cwd: worktreePath,
+            timeout: 10000,
+          }).catch(() => {});
+
+          return true;
+        } catch (sshError: unknown) {
+          const sshMsg = sshError instanceof Error ? sshError.message : String(sshError);
+          warn('[gitService.pushWithFallbacks]', 'SSH fallback failed', { error: sshMsg });
+        }
+      }
+
+      const proxy = await detectProxy(worktreePath);
+      if (proxy) {
+        try {
+          info('[gitService.pushWithFallbacks]', 'Retrying push via proxy');
+          const proxyArgs = remoteExists
+            ? `git -c http.proxy="${proxy}" push origin "${branchName}"`
+            : `git -c http.proxy="${proxy}" push -u origin "${branchName}"`;
+          await execAsync(proxyArgs, { cwd: worktreePath, timeout: 60000 });
+          info('[gitService.pushWithFallbacks]', 'Proxy push successful', { branchName });
+          return true;
+        } catch (proxyError: unknown) {
+          const proxyMsg = proxyError instanceof Error ? proxyError.message : String(proxyError);
+          warn('[gitService.pushWithFallbacks]', 'Proxy fallback failed', { error: proxyMsg });
+        }
+      }
+
+      throw pushError;
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logError('[gitService.pushWithFallbacks]', 'Push failed', {
+      worktreePath,
+      branchName,
+    }, e);
+    vscode.window.showErrorMessage(`Git push failed: ${msg}`);
+    return false;
+  }
+}
+
 export async function commitAndPush(
   worktreePath: string,
   commitMsg: string,
@@ -331,107 +464,32 @@ export async function commitAndPush(
     commitMsgPreview: commitMsg.slice(0, 80),
   });
 
+  const committed = await commitOnly(worktreePath, commitMsg);
+  if (!committed) return false;
+
+  return pushWithFallbacks(worktreePath, branchName);
+}
+
+export async function getBranchDiff(
+  worktreePath: string,
+  baseCommitish: string,
+  maxLength: number = 8000,
+): Promise<string> {
   try {
-    // Safety: stage any changes before committing
-    await execAsync('git add -A', { cwd: worktreePath, timeout: 30000 });
-
-    // Check if there are actually changes to commit (handles retry scenarios)
-    const { stdout: statusOut } = await execAsync('git status --porcelain', {
+    const { stdout } = await execAsync(`git diff ${baseCommitish}..HEAD`, {
       cwd: worktreePath,
-      timeout: 10000,
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
     });
-
-    if (statusOut.trim()) {
-      // Write commit message to temp file inside worktree (after git add, so not staged)
-      const msgFile = path.join(worktreePath, '.quick-pr-studio-commit-msg');
-      fs.writeFileSync(msgFile, commitMsg, 'utf-8');
-
-      try {
-        await execAsync(`git commit -F "${msgFile}"`, { cwd: worktreePath, timeout: 30000 });
-      } finally {
-        if (fs.existsSync(msgFile)) {
-          fs.unlinkSync(msgFile);
-        }
-      }
-
-      info('[gitService.commitAndPush]', 'Commit successful', { branchName });
-    } else {
-      info('[gitService.commitAndPush]', 'No changes to commit, skipping', { branchName });
+    const trimmed = stdout.trim();
+    if (!trimmed) return '';
+    if (trimmed.length > maxLength) {
+      return trimmed.slice(0, maxLength) + '\n...(diff truncated)';
     }
-
-    // Attempt push — if fails, fall back to SSH then proxy
-    try {
-      await execAsync(`git push -u origin "${branchName}"`, { cwd: worktreePath, timeout: 60000 });
-    } catch (pushError: unknown) {
-      const pushMsg = pushError instanceof Error ? pushError.message : String(pushError);
-      warn('[gitService.commitAndPush]', 'Initial push failed, attempting fallbacks', {
-        branchName,
-        error: pushMsg,
-      });
-
-      // Get remote URL for potential SSH fallback
-      const { stdout: remoteUrl } = await execAsync('git remote get-url origin', {
-        cwd: worktreePath,
-        timeout: 10000,
-      }).catch(() => ({ stdout: '' }));
-
-      const sshUrl = remoteUrl.trim() && httpsToSshUrl(remoteUrl.trim());
-
-      // Fallback 1: SSH
-      if (sshUrl) {
-        try {
-          info('[gitService.commitAndPush]', 'Retrying push via SSH', { sshUrl });
-          await execAsync(`git push -u "${sshUrl}" "${branchName}"`, {
-            cwd: worktreePath,
-            timeout: 60000,
-          });
-          info('[gitService.commitAndPush]', 'SSH push successful', { branchName });
-
-          // Update origin remote to use SSH for future pushes
-          await execAsync(`git remote set-url origin "${sshUrl}"`, {
-            cwd: worktreePath,
-            timeout: 10000,
-          }).catch(() => {});
-
-          return true;
-        } catch (sshError: unknown) {
-          const sshMsg = sshError instanceof Error ? sshError.message : String(sshError);
-          warn('[gitService.commitAndPush]', 'SSH fallback failed', { error: sshMsg });
-        }
-      }
-
-      // Fallback 2: Proxy (if proxy is configured)
-      const proxy = await detectProxy(worktreePath);
-      if (proxy) {
-        try {
-          info('[gitService.commitAndPush]', 'Retrying push via proxy');
-          await execAsync(`git -c http.proxy="${proxy}" push -u origin "${branchName}"`, {
-            cwd: worktreePath,
-            timeout: 60000,
-          });
-          info('[gitService.commitAndPush]', 'Proxy push successful', { branchName });
-          return true;
-        } catch (proxyError: unknown) {
-          const proxyMsg = proxyError instanceof Error ? proxyError.message : String(proxyError);
-          warn('[gitService.commitAndPush]', 'Proxy fallback failed', { error: proxyMsg });
-        }
-      }
-
-      // All fallbacks exhausted
-      throw pushError;
-    }
-
-    info('[gitService.commitAndPush]', 'Push successful', { branchName });
-    return true;
+    return trimmed;
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logError('[gitService.commitAndPush]', 'Commit or push failed', {
-      worktreePath,
-      branchName,
-      commitMsgPreview: commitMsg.slice(0, 80),
-    }, e);
-    vscode.window.showErrorMessage(`Git operation failed: ${msg}`);
-    return false;
+    warn('[gitService.getBranchDiff]', 'Failed to get branch diff', { baseCommitish });
+    return '';
   }
 }
 
@@ -449,7 +507,6 @@ export async function deleteWorktree(
     info('[gitService.deleteWorktree]', 'Worktree deleted', { worktreePath });
     return true;
   } catch (e: unknown) {
-    // If git worktree remove fails, force-remove the directory and prune
     try {
       warn('[gitService.deleteWorktree]', 'git worktree remove failed, trying force cleanup', { worktreePath });
       if (fs.existsSync(worktreePath)) {
@@ -492,7 +549,6 @@ export async function getFilesDiff(
     const relativePaths = selectedFiles.map(f => path.relative(workspaceRoot, f));
     const parts: string[] = [];
 
-    // 1) Try git diff HEAD for tracked files
     const trackedFiles: string[] = [];
     const untrackedFiles: string[] = [];
 
@@ -516,7 +572,6 @@ export async function getFilesDiff(
       if (stdout.trim()) parts.push(stdout.trim());
     }
 
-    // 2) For untracked files, show their full content as a unified-diff-style addition
     for (const fp of untrackedFiles) {
       const fullPath = path.join(workspaceRoot, fp);
       if (fs.existsSync(fullPath)) {
