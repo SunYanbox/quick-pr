@@ -1,6 +1,13 @@
 .vscode/
+.quick-pr-studio/
+.claude/
 src/
 node_modules/
 .eslintrc.json
 tsconfig.json
 esbuild.config.mjs
+CLAUDE.md
+implementation-document.md
+实现文档.md
+.gitignore
+.markdownlint.yaml
