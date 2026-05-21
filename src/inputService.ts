@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { generatePrContent, generateBranchName, generateCommitMessage, generatePrDescription } from './aiService';
 import { loadProjectConfig } from './projectConfig';
-import { getRecentCommits, getFilesDiff, getBranchDiff } from './gitService';
+import { getRecentCommits, getFilesDiff, getBranchDiff, getFileDiff } from './gitService';
 import { info, warn, error as logError } from './logger';
 
 export interface CollectedInputs {
@@ -182,24 +182,102 @@ function getWebviewHtml(
     .file-status.modified { background: #005cc5; color: #fff; }
     .file-status.added { background: #28a745; color: #fff; }
     .file-status.deleted { background: #cb2431; color: #fff; }
+    /* Diff view styles */
+    .file-entry { border-bottom: 1px solid var(--vscode-input-border, #333); }
+    .file-header {
+      display: flex;
+      align-items: center;
+      padding: 4px 10px;
+      cursor: pointer;
+      gap: 8px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--vscode-sideBar-background);
+    }
+    .file-header:hover { background: var(--vscode-list-hoverBackground); }
+    .file-header input[type="checkbox"] { flex-shrink: 0; width: 16px; height: 16px; cursor: pointer; }
+    .file-header .file-path {
+      flex: 1;
+      font-size: var(--vscode-font-size);
+      color: var(--vscode-editor-foreground);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .file-header .expand-icon {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      flex-shrink: 0;
+      width: 16px;
+      text-align: center;
+      transition: transform 0.15s;
+    }
+    .file-header .expand-icon.expanded { transform: rotate(90deg); }
+    .file-diff {
+      display: none;
+      overflow-x: auto;
+      border-top: 1px solid var(--vscode-input-border, #333);
+    }
+    .file-diff.open { display: block; }
+    .diff-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
+      font-size: 12px;
+      line-height: 1.5;
+      table-layout: fixed;
+    }
+    .diff-table td {
+      padding: 0 4px;
+      vertical-align: top;
+      white-space: pre;
+    }
+    .diff-gutter {
+      width: 40px;
+      text-align: right;
+      color: var(--vscode-editorLineNumber-foreground, #858585);
+      user-select: none;
+      background: var(--vscode-sideBar-background);
+    }
+    .diff-content { width: 50%; }
+    .diff-line-add { background: rgba(40, 167, 69, 0.15); }
+    .diff-line-del { background: rgba(203, 36, 49, 0.15); }
+    .diff-line-mod-left { background: rgba(203, 36, 49, 0.15); }
+    .diff-line-mod-right { background: rgba(40, 167, 69, 0.15); }
+    .diff-empty-hint {
+      padding: 16px;
+      text-align: center;
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+    }
+    .diff-loading {
+      padding: 16px;
+      text-align: center;
+      color: var(--vscode-descriptionForeground);
+    }
   </style>
 </head>
 <body>
   <h2>Create Pull Request</h2>
 
   <div class="form-group" id="changedFilesGroup" style="${changedFiles.length === 0 ? 'display:none' : ''}">
-    <label>Changed Files</label>
+    <label>Changed Files (double-click to view diff)</label>
     <div class="file-list" id="fileList">
       ${changedFiles.map((f, i) => `
-      <label class="file-item">
-        <input type="checkbox" class="file-checkbox" checked />
-        <span class="file-path">${path.relative(normalizedRoot, normalizePath(f.path)).replace(/\\/g, '/')}</span>
-        <span class="file-status ${f.status}">${f.status}</span>
-      </label>
+      <div class="file-entry" data-file-index="${i}">
+        <div class="file-header" data-file-path="${normalizePath(f.path)}">
+          <input type="checkbox" class="file-checkbox" checked />
+          <span class="file-path">${path.relative(normalizedRoot, normalizePath(f.path)).replace(/\\/g, '/')}</span>
+          <span class="file-status ${f.status}">${f.status}</span>
+          <span class="expand-icon">&#9654;</span>
+        </div>
+        <div class="file-diff" id="diff-${i}"></div>
+      </div>
       `).join('')}
     </div>
     <div class="error" id="fileError">Please select at least one file</div>
-    <div class="hint">Uncheck files you don't want to include in this PR</div>
+    <div class="hint">Uncheck files you don't want to include. Double-click to view diff.</div>
   </div>
 
   <div class="form-group">
@@ -368,6 +446,82 @@ function getWebviewHtml(
         });
       }
     }
+
+    // Double-click to expand diff
+    document.querySelectorAll('.file-header').forEach(header => {
+      header.addEventListener('dblclick', function() {
+        const entry = this.closest('.file-entry');
+        const diffDiv = entry.querySelector('.file-diff');
+        const icon = this.querySelector('.expand-icon');
+        const isOpen = diffDiv.classList.contains('open');
+
+        if (isOpen) {
+          diffDiv.classList.remove('open');
+          diffDiv.innerHTML = '';
+          icon.classList.remove('expanded');
+        } else {
+          icon.classList.add('expanded');
+          diffDiv.classList.add('open');
+          diffDiv.innerHTML = '<div class="diff-loading">Loading diff...</div>';
+          const filePath = this.dataset.filePath;
+          vscode.postMessage({ type: 'getDiff', filePath: filePath });
+        }
+      });
+    });
+
+    // Listen for diff results
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (msg.type === 'diffResult') {
+        const allEntries = document.querySelectorAll('.file-entry');
+        for (const entry of allEntries) {
+          const header = entry.querySelector('.file-header');
+          if (header.dataset.filePath === msg.filePath) {
+            const diffDiv = entry.querySelector('.file-diff');
+            diffDiv.innerHTML = renderDiff(msg.diff);
+            break;
+          }
+        }
+      }
+    });
+
+    function escapeHtml(text) {
+      if (text === null || text === undefined) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/ /g, '&nbsp;');
+    }
+
+    function renderDiff(diff) {
+      if (!diff || diff.length === 0) {
+        return '<div class="diff-empty-hint">No changes to display</div>';
+      }
+
+      let html = '<table class="diff-table">';
+      for (const pair of diff) {
+        const leftContent = escapeHtml(pair.leftContent);
+        const rightContent = escapeHtml(pair.rightContent);
+        const leftNum = pair.leftLineNum !== null ? pair.leftLineNum : '';
+        const rightNum = pair.rightLineNum !== null ? pair.rightLineNum : '';
+
+        let leftClass = 'diff-content';
+        let rightClass = 'diff-content';
+        if (pair.type === 'deletion') { leftClass += ' diff-line-del'; rightClass += ' diff-line-del'; }
+        else if (pair.type === 'addition') { leftClass += ' diff-line-add'; rightClass += ' diff-line-add'; }
+        else if (pair.type === 'modification') { leftClass += ' diff-line-mod-left'; rightClass += ' diff-line-mod-right'; }
+
+        html += `<tr>
+          <td class="diff-gutter">${leftNum}</td>
+          <td class="${leftClass}">${leftContent || ''}</td>
+          <td class="diff-gutter">${rightNum}</td>
+          <td class="${rightClass}">${rightContent || ''}</td>
+        </tr>`;
+      }
+      html += '</table>';
+      return html;
+    }
   </script>
 </body>
 </html>`;
@@ -466,6 +620,10 @@ export async function collectInputs(
               }
             },
           );
+        } else if (msg.type === 'getDiff') {
+          const filePath = msg.filePath as string;
+          const diff = await getFileDiff(workspaceRoot, filePath);
+          panel.webview.postMessage({ type: 'diffResult', filePath, diff });
         } else if (msg.type === 'submit') {
           info('[inputService]', 'User submitted PR form', {
             branchName: msg.branchName,
