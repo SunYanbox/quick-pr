@@ -180,12 +180,6 @@ export interface DiffLinePair {
   type: 'context' | 'addition' | 'deletion' | 'modification';
 }
 
-export interface DetailedFileStatus {
-  path: string;
-  status: 'staged' | 'added' | 'modified' | 'deleted';
-}
-}
-
 export function getChangedFiles(repo: Repository): ChangedFile[] {
   const files = new Map<string, ChangedFile>();
 
@@ -226,7 +220,7 @@ async function fileExistsInGit(
 export async function getDetailedFileStatus(
   repoPath: string,
   filePath: string,
-): Promise<'staged' | 'added' | 'modified' | 'deleted'> {
+): Promise<'added' | 'modified' | 'deleted'> {
   const relativePath = path.relative(repoPath, filePath).replace(/\\/g, '/');
   const existsOnDisk = fs.existsSync(filePath);
   const existsInHead = await fileExistsInGit(repoPath, relativePath, 'HEAD');
@@ -336,7 +330,9 @@ export async function getFileDiff(
       return [];
     }
     return parseUnifiedDiff(stdout);
-  } catch (e) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logError('[gitService.getFileDiff]', 'Failed to get file diff', { filePath }, e);
     return [];
   }
 }
