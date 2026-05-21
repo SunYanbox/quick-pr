@@ -2,15 +2,19 @@
   "name": "quick-pr-studio",
   "displayName": "Quick PR Studio",
   "description": "Create GitHub PRs quickly from VS Code using worktree workflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "Suntion",
   "repository": {
     "type": "git",
     "url": "https://github.com/SunYanbox/quick-pr-studio"
   },
   "license": "MIT",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -100,7 +104,10 @@
         },
         "quick-pr-studio.workflowMode": {
           "type": "string",
-          "enum": ["one-shot", "step-by-step"],
+          "enum": [
+            "one-shot",
+            "step-by-step"
+          ],
           "default": "one-shot",
           "description": "PR workflow mode: 'one-shot' creates PR in one go, 'step-by-step' allows multiple commits"
         },

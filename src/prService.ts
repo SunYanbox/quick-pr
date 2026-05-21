@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import { info, error as logError } from './logger';
 
 export async function checkGhCli(): Promise<boolean> {
@@ -74,19 +74,36 @@ export async function createPr(options: PrCreateOptions): Promise<string | null>
       '--body', body,
     ];
 
-    const cmd = `gh ${args.map((a) => `"${a}"`).join(' ')}`;
+    let stdout = '';
+    let stderr = '';
+    const child = spawn('gh', args, { cwd: worktreePath });
+    child.stdout.on('data', (data) => { stdout += data.toString(); });
+    child.stderr.on('data', (data) => { stderr += data.toString(); });
 
-    exec(cmd, { cwd: worktreePath }, (error, stdout, stderr) => {
-      if (error) {
-        const errMsg = stderr || error.message;
+    child.on('error', (spawnError) => {
+      logError('[prService.createPr]', 'Failed to spawn gh process', {
+        titlePreview: title.slice(0, 80),
+        base,
+        head,
+        worktreePath,
+      }, spawnError);
+      vscode.window.showErrorMessage(
+        `Failed to create PR: ${spawnError.message}`,
+      );
+      resolve(null);
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        const errMsg = stderr || `Exit code ${code}`;
         logError('[prService.createPr]', 'Failed to create PR', {
           titlePreview: title.slice(0, 80),
           base,
           head,
           worktreePath,
-          exitCode: (error as any)?.code,
+          exitCode: code,
           stderr: stderr || '(no stderr)',
-        }, error);
+        });
         vscode.window.showErrorMessage(
           `Failed to create PR: ${errMsg}`,
         );
