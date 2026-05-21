@@ -2,7 +2,7 @@
   "name": "quick-pr-studio",
   "displayName": "Quick PR Studio",
   "description": "Create GitHub PRs quickly from VS Code using worktree workflow",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "Suntion",
   "repository": {
     "type": "git",
