@@ -172,14 +172,6 @@ export async function filterFilesCommittedToWorktree(
   return result;
 }
 
-export interface DiffLinePair {
-  leftLineNum: number | null;
-  leftContent: string | null;
-  rightLineNum: number | null;
-  rightContent: string | null;
-  type: 'context' | 'addition' | 'deletion' | 'modification';
-}
-
 export function getChangedFiles(repo: Repository): ChangedFile[] {
   const files = new Map<string, ChangedFile>();
 
