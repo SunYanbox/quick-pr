@@ -11,17 +11,6 @@
   "license": "MIT",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
-  "activationEvents": [
-    "onCommand:quick-pr-studio.createPr",
-    "onCommand:quick-pr-studio.startStepByStep",
-    "onCommand:quick-pr-studio.addCommit",
-    "onCommand:quick-pr-studio.finalizePr",
-    "onCommand:quick-pr-studio.openWorktree",
-    "onCommand:quick-pr-studio.retryWorktree",
-    "onCommand:quick-pr-studio.cleanupWorktree",
-    "onCommand:quick-pr-studio.refreshWorktrees",
-    "onView:quick-pr-studio.worktreeList"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -59,7 +48,7 @@
       }
     ],
     "views": {
-      "quick-pr-studio.worktrees": [
+      "quick-pr-studio-worktrees": [
         {
           "id": "quick-pr-studio.worktreeList",
           "name": "Worktrees",
@@ -70,7 +59,7 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "quick-pr-studio.worktrees",
+          "id": "quick-pr-studio-worktrees",
           "title": "Quick PR Studio",
           "icon": "$(git-pull-request)"
         }
