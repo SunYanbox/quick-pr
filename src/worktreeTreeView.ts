@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { getActiveWorktree, getAllWorktrees, WorktreeInfo } from './worktreeManager';
+import { getAllWorktrees, WorktreeInfo } from './worktreeManager';
 
-type TreeNode = ActionNode | WorktreeNode;
+type TreeNode = ActionNode | WorktreeNode | WorktreeActionNode;
 
 interface ActionNode {
   type: 'action';
@@ -14,6 +14,15 @@ interface ActionNode {
 interface WorktreeNode {
   type: 'worktree';
   info: WorktreeInfo;
+}
+
+interface WorktreeActionNode {
+  type: 'worktreeAction';
+  worktreeId: string;
+  label: string;
+  command: string;
+  icon?: string;
+  tooltip?: string;
 }
 
 export class WorktreeTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
@@ -44,12 +53,28 @@ export class WorktreeTreeDataProvider implements vscode.TreeDataProvider<TreeNod
       return item;
     }
 
+    if (element.type === 'worktreeAction') {
+      const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+      item.command = {
+        command: element.command,
+        title: element.label,
+        arguments: [element.worktreeId],
+      };
+      if (element.icon) {
+        item.iconPath = new vscode.ThemeIcon(element.icon);
+      }
+      if (element.tooltip) {
+        item.tooltip = element.tooltip;
+      }
+      return item;
+    }
+
     const { info } = element;
     const statusIcon = this.getStatusIcon(info.status);
     const badge = info.commitCount > 0 ? `(${info.commitCount} commits)` : '(empty)';
     const label = `${info.branchName} ${badge}`;
 
-    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
     item.iconPath = new vscode.ThemeIcon(statusIcon, new vscode.ThemeColor(this.getStatusColor(info.status)));
     item.tooltip = [
       `Branch: ${info.branchName}`,
@@ -61,70 +86,23 @@ export class WorktreeTreeDataProvider implements vscode.TreeDataProvider<TreeNod
       info.errorMessage ? `Error: ${info.errorMessage}` : '',
     ].filter(Boolean).join('\n');
 
-    item.command = {
-      command: 'quick-pr-studio.openWorktree',
-      title: 'Open Worktree',
-      arguments: [info.id],
-    };
-
     item.contextValue = info.status;
 
     return item;
   }
 
   getChildren(element?: TreeNode): vscode.ProviderResult<TreeNode[]> {
-    if (element) return [];
+    if (!element) {
+      const nodes: TreeNode[] = [];
 
-    const nodes: TreeNode[] = [];
-    const active = getActiveWorktree(this.workspaceRoot);
-    const all = getAllWorktrees(this.workspaceRoot);
+      nodes.push({
+        type: 'action',
+        label: 'Create Pull Request',
+        command: 'quick-pr-studio.createPr',
+        icon: 'git-pull-request-create',
+        tooltip: 'Create a PR in one shot (all changes in a single commit)',
+      });
 
-    nodes.push({
-      type: 'action',
-      label: 'Create Pull Request',
-      command: 'quick-pr-studio.createPr',
-      icon: 'git-pull-request-create',
-      tooltip: 'Create a PR in one shot (all changes in a single commit)',
-    });
-
-    if (active) {
-      if (active.status === 'created' || active.status === 'committed') {
-        nodes.push({
-          type: 'action',
-          label: `Add Commit to ${active.branchName}`,
-          command: 'quick-pr-studio.addCommit',
-          icon: 'git-commit',
-          tooltip: 'Select files and commit to this worktree',
-        });
-
-        if (active.status === 'committed') {
-          nodes.push({
-            type: 'action',
-            label: `Finalize ${active.branchName}`,
-            command: 'quick-pr-studio.finalizePr',
-            icon: 'cloud-upload',
-            tooltip: 'Push commits and create the PR',
-          });
-        }
-      }
-
-      if (active.status === 'error') {
-        nodes.push({
-          type: 'action',
-          label: `Retry ${active.branchName}`,
-          command: 'quick-pr-studio.retryWorktree',
-          icon: 'debug-rerun',
-          tooltip: active.errorMessage || 'Retry the failed step',
-        });
-        nodes.push({
-          type: 'action',
-          label: `Cleanup ${active.branchName}`,
-          command: 'quick-pr-studio.cleanupWorktree',
-          icon: 'trash',
-          tooltip: 'Delete this worktree and its branch',
-        });
-      }
-    } else {
       nodes.push({
         type: 'action',
         label: 'Start Step-by-Step PR',
@@ -132,13 +110,73 @@ export class WorktreeTreeDataProvider implements vscode.TreeDataProvider<TreeNod
         icon: 'repo-create',
         tooltip: 'Create a new worktree and branch, add commits over time',
       });
+
+      for (const info of getAllWorktrees(this.workspaceRoot)) {
+        nodes.push({ type: 'worktree', info });
+      }
+
+      return nodes;
     }
 
-    for (const info of all) {
-      nodes.push({ type: 'worktree', info });
+    if (element.type === 'worktree') {
+      const actions: WorktreeActionNode[] = [];
+      const { info } = element;
+
+      actions.push({
+        type: 'worktreeAction',
+        worktreeId: info.id,
+        label: `Open ${info.branchName}`,
+        command: 'quick-pr-studio.openWorktree',
+        icon: 'link-external',
+        tooltip: 'Open worktree detail and management page',
+      });
+
+      if (info.status === 'created' || info.status === 'committed') {
+        actions.push({
+          type: 'worktreeAction',
+          worktreeId: info.id,
+          label: `Add Commit to ${info.branchName}`,
+          command: 'quick-pr-studio.addCommit',
+          icon: 'git-commit',
+          tooltip: 'Select files and commit to this worktree',
+        });
+      }
+
+      if (info.status === 'committed') {
+        actions.push({
+          type: 'worktreeAction',
+          worktreeId: info.id,
+          label: `Finalize ${info.branchName}`,
+          command: 'quick-pr-studio.finalizePr',
+          icon: 'cloud-upload',
+          tooltip: 'Push commits and create the PR',
+        });
+      }
+
+      if (info.status === 'error') {
+        actions.push({
+          type: 'worktreeAction',
+          worktreeId: info.id,
+          label: `Retry ${info.branchName}`,
+          command: 'quick-pr-studio.retryWorktree',
+          icon: 'debug-rerun',
+          tooltip: info.errorMessage || 'Retry the failed step',
+        });
+      }
+
+      actions.push({
+        type: 'worktreeAction',
+        worktreeId: info.id,
+        label: `Delete ${info.branchName}`,
+        command: 'quick-pr-studio.cleanupWorktree',
+        icon: 'trash',
+        tooltip: 'Delete this worktree and its branch',
+      });
+
+      return actions;
     }
 
-    return nodes;
+    return [];
   }
 
   private getStatusIcon(status: string): string {

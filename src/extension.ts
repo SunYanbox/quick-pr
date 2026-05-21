@@ -3,6 +3,7 @@ import { collectInputs, collectStepByStepInputs, collectAddCommitInputs, collect
 import {
   getCurrentRepo,
   getChangedFiles,
+  filterFilesCommittedToWorktree,
   createWorktree,
   commitOnly,
   pushWithFallbacks,
@@ -251,7 +252,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const addCommitDisposable = vscode.commands.registerCommand(
     'quick-pr-studio.addCommit',
-    async () => {
+    async (worktreeId?: string) => {
       const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
       if (!wsRoot) {
         vscode.window.showErrorMessage('No workspace folder open');
@@ -260,10 +261,12 @@ export function activate(context: vscode.ExtensionContext) {
 
       initLogger(wsRoot);
 
-      const active = getActiveWorktree(wsRoot);
+      const active = worktreeId
+        ? getWorktree(wsRoot, worktreeId)
+        : getActiveWorktree(wsRoot);
       if (!active) {
         vscode.window.showWarningMessage(
-          'No active worktree. Create one first with "Start Step-by-Step PR" in the sidebar.',
+          'No worktree found. Create one first with "Start Step-by-Step PR" in the sidebar.',
         );
         return;
       }
@@ -271,9 +274,19 @@ export function activate(context: vscode.ExtensionContext) {
       const gitStatus = getCurrentRepo();
       if (!gitStatus) return;
 
-      const changedFiles = getChangedFiles(gitStatus.repo);
-      if (changedFiles.length === 0) {
+      const allChangedFiles = getChangedFiles(gitStatus.repo);
+      if (allChangedFiles.length === 0) {
         vscode.window.showWarningMessage('No changes detected in the repository.');
+        return;
+      }
+
+      const changedFiles = await filterFilesCommittedToWorktree(
+        allChangedFiles,
+        gitStatus.repo.rootUri.fsPath,
+        active.branchName,
+      );
+      if (changedFiles.length === 0) {
+        vscode.window.showWarningMessage('No new changes beyond what is already committed to the worktree.');
         return;
       }
 
@@ -324,7 +337,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const finalizePrDisposable = vscode.commands.registerCommand(
     'quick-pr-studio.finalizePr',
-    async () => {
+    async (worktreeId?: string) => {
       const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
       if (!wsRoot) {
         vscode.window.showErrorMessage('No workspace folder open');
@@ -333,7 +346,9 @@ export function activate(context: vscode.ExtensionContext) {
 
       initLogger(wsRoot);
 
-      const active = getActiveWorktree(wsRoot);
+      const active = worktreeId
+        ? getWorktree(wsRoot, worktreeId)
+        : getActiveWorktree(wsRoot);
       if (!active) {
         vscode.window.showWarningMessage('No active worktree to finalize.');
         return;
@@ -479,10 +494,10 @@ export function activate(context: vscode.ExtensionContext) {
           return committed;
         },
         async (wtInfo) => {
-          vscode.commands.executeCommand('quick-pr-studio.finalizePr');
+          vscode.commands.executeCommand('quick-pr-studio.finalizePr', wtInfo.id);
         },
         async (wtInfo) => {
-          vscode.commands.executeCommand('quick-pr-studio.retryWorktree');
+          vscode.commands.executeCommand('quick-pr-studio.retryWorktree', wtInfo.id);
         },
         async (wtInfo) => {
           const gitStatus = getCurrentRepo();
@@ -500,7 +515,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const retryWorktreeDisposable = vscode.commands.registerCommand(
     'quick-pr-studio.retryWorktree',
-    async () => {
+    async (worktreeId?: string) => {
       const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
       if (!wsRoot) {
         vscode.window.showErrorMessage('No workspace folder open');
@@ -509,7 +524,9 @@ export function activate(context: vscode.ExtensionContext) {
 
       initLogger(wsRoot);
 
-      const active = getActiveWorktree(wsRoot);
+      const active = worktreeId
+        ? getWorktree(wsRoot, worktreeId)
+        : getActiveWorktree(wsRoot);
       if (!active || active.status !== 'error') {
         vscode.window.showWarningMessage('No failed worktree to retry.');
         return;
@@ -599,7 +616,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const cleanupWorktreeDisposable = vscode.commands.registerCommand(
     'quick-pr-studio.cleanupWorktree',
-    async () => {
+    async (worktreeId?: string) => {
       const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
       if (!wsRoot) {
         vscode.window.showErrorMessage('No workspace folder open');
@@ -608,7 +625,9 @@ export function activate(context: vscode.ExtensionContext) {
 
       initLogger(wsRoot);
 
-      const active = getActiveWorktree(wsRoot);
+      const active = worktreeId
+        ? getWorktree(wsRoot, worktreeId)
+        : getActiveWorktree(wsRoot);
       if (!active) {
         vscode.window.showWarningMessage('No active worktree to clean up.');
         return;

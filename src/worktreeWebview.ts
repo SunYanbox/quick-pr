@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { WorktreeInfo, getWorktree, updateWorktree, removeWorktree } from './worktreeManager';
-import { getCurrentRepo, getChangedFiles, copyFilesToWorktree, commitOnly, getFilesDiff, getRecentCommits } from './gitService';
+import { getCurrentRepo, getChangedFiles, filterFilesCommittedToWorktree, copyFilesToWorktree, commitOnly, getFilesDiff, getRecentCommits } from './gitService';
 import { generateCommitMessage } from './aiService';
 import { loadProjectConfig } from './projectConfig';
-import { info, error as logError } from './logger';
+import { error as logError } from './logger';
 
 function normalizePath(p: string): string {
   const resolved = path.resolve(p);
@@ -283,7 +283,10 @@ export async function openWorktreeWebview(
   }
 
   const gitStatus = getCurrentRepo();
-  const changedFiles = gitStatus ? getChangedFiles(gitStatus.repo) : [];
+  const allChangedFiles = gitStatus ? getChangedFiles(gitStatus.repo) : [];
+  const changedFiles = gitStatus
+    ? await filterFilesCommittedToWorktree(allChangedFiles, gitStatus.repo.rootUri.fsPath, info.branchName)
+    : [];
 
   const panel = vscode.window.createWebviewPanel(
     'quickPrWorktreeDetail',
@@ -320,7 +323,11 @@ export async function openWorktreeWebview(
         if (success) {
           const updated = getWorktree(workspaceRoot, worktreeId);
           if (updated) {
-            panel.webview.html = getWorktreeWebviewHtml(updated, changedFiles, workspaceRoot);
+            const newAllChangedFiles = gitStatus ? getChangedFiles(gitStatus.repo) : [];
+            const newChangedFiles = gitStatus
+              ? await filterFilesCommittedToWorktree(newAllChangedFiles, gitStatus.repo.rootUri.fsPath, updated.branchName)
+              : [];
+            panel.webview.html = getWorktreeWebviewHtml(updated, newChangedFiles, workspaceRoot);
           }
           vscode.window.showInformationMessage(`Commit added to ${info.branchName}`);
         }

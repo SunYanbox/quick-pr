@@ -76,12 +76,12 @@ export function getActiveWorktree(workspaceRoot: string): WorktreeInfo | null {
   return data.worktrees[data.activeId] || null;
 }
 
-export function addWorktree(workspaceRoot: string, info: WorktreeInfo): void {
+export function addWorktree(workspaceRoot: string, wtInfo: WorktreeInfo): void {
   const data = loadWorktrees(workspaceRoot);
-  data.worktrees[info.id] = info;
-  data.activeId = info.id;
+  data.worktrees[wtInfo.id] = wtInfo;
+  data.activeId = wtInfo.id;
   saveWorktrees(workspaceRoot, data);
-  info('[worktreeManager.addWorktree]', 'Worktree added', { id: info.id, branchName: info.branchName });
+  info('[worktreeManager.addWorktree]', 'Worktree added', { id: wtInfo.id, branchName: wtInfo.branchName });
 }
 
 export function updateWorktree(workspaceRoot: string, id: string, updates: Partial<WorktreeInfo>): void {

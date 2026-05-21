@@ -62,6 +62,116 @@ export interface ChangedFile {
   status: 'staged' | 'modified';
 }
 
+export async function getWorktreeChangedFiles(
+  worktreePath: string,
+): Promise<ChangedFile[]> {
+  try {
+    const { stdout } = await execAsync(
+      'git status --porcelain',
+      { cwd: worktreePath, timeout: 30000 },
+    );
+
+    const files: ChangedFile[] = [];
+    for (const line of stdout.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const filePath = trimmed.substring(3).trim();
+      const fullPath = path.join(worktreePath, filePath);
+
+      if (!fs.existsSync(fullPath)) continue;
+
+      files.push({ path: fullPath, status: 'modified' });
+    }
+
+    return files;
+  } catch {
+    return [];
+  }
+}
+
+/** Filter main-repo changed files against the worktree branch to exclude
+ *  files already committed to the worktree without further changes. */
+export async function filterFilesCommittedToWorktree(
+  changedFiles: ChangedFile[],
+  workspaceRoot: string,
+  worktreeBranch: string,
+): Promise<ChangedFile[]> {
+  if (!worktreeBranch) {
+    warn('[filterFilesCommittedToWorktree]', 'No worktree branch provided, returning all files', { count: changedFiles.length });
+    return changedFiles;
+  }
+
+  info('[filterFilesCommittedToWorktree]', 'Starting diff filter', {
+    worktreeBranch,
+    totalChangedFiles: changedFiles.length,
+    files: changedFiles.map(f => ({
+      path: path.relative(workspaceRoot, f.path).replace(/\\/g, '/'),
+      status: f.status,
+    })),
+  });
+
+  const result: ChangedFile[] = [];
+
+  for (const file of changedFiles) {
+    const relativePath = path.relative(workspaceRoot, file.path).replace(/\\/g, '/');
+
+    // Get the blob hash of the file in the worktree branch
+    let branchHash = '';
+    try {
+      const { stdout } = await execAsync(
+        `git rev-parse "${worktreeBranch}:${relativePath}"`,
+        { cwd: workspaceRoot, timeout: 5000 },
+      );
+      branchHash = stdout.trim();
+    } catch {
+      info('[filterFilesCommittedToWorktree]', `File "${relativePath}" is NEW (not on branch "${worktreeBranch}") → INCLUDED`);
+      result.push(file);
+      continue;
+    }
+
+    // Get the blob hash of the current file (staged or working tree)
+    let currentHash = '';
+    try {
+      if (file.status === 'staged') {
+        const { stdout } = await execAsync(
+          `git ls-files --stage "${relativePath}"`,
+          { cwd: workspaceRoot, timeout: 5000 },
+        );
+        const parts = stdout.trim().split(/\s+/);
+        currentHash = parts[1] || '';
+      } else {
+        const { stdout } = await execAsync(
+          `git hash-object "${relativePath}"`,
+          { cwd: workspaceRoot, timeout: 5000 },
+        );
+        currentHash = stdout.trim();
+      }
+    } catch {
+      info('[filterFilesCommittedToWorktree]', `File "${relativePath}" cannot be hashed (possibly deleted) → INCLUDED`);
+      result.push(file);
+      continue;
+    }
+
+    if (branchHash === currentHash) {
+      info('[filterFilesCommittedToWorktree]', `File "${relativePath}" matches branch "${worktreeBranch}" (hash: ${branchHash}) → SKIPPED`);
+    } else {
+      info('[filterFilesCommittedToWorktree]', `File "${relativePath}" differs from branch "${worktreeBranch}" (branch: ${branchHash}, local: ${currentHash}) → INCLUDED`);
+      result.push(file);
+    }
+  }
+
+  info('[filterFilesCommittedToWorktree]', 'Diff filter complete', {
+    worktreeBranch,
+    totalChangedFiles: changedFiles.length,
+    includedCount: result.length,
+    skippedCount: changedFiles.length - result.length,
+    includedFiles: result.map(f => path.relative(workspaceRoot, f.path).replace(/\\/g, '/')),
+  });
+
+  return result;
+}
+
 export function getChangedFiles(repo: Repository): ChangedFile[] {
   const files = new Map<string, ChangedFile>();
 
