@@ -38,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
   const treeDataProvider = new WorktreeTreeDataProvider(
     workspaceRoot || '',
   );
-  const treeView = vscode.window.createTreeView('quick-pr-studio.worktreeList', {
+  const treeView = vscode.window.createTreeView('quick-pr-studio-worktreeList', {
     treeDataProvider,
     showCollapseAll: false,
   });

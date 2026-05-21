@@ -6,7 +6,7 @@ type TreeNode = ActionNode | WorktreeNode;
 interface ActionNode {
   type: 'action';
   label: string;
-  command: string;
+  command?: string;
   icon?: string;
   tooltip?: string;
 }
@@ -29,10 +29,12 @@ export class WorktreeTreeDataProvider implements vscode.TreeDataProvider<TreeNod
   getTreeItem(element: TreeNode): vscode.TreeItem {
     if (element.type === 'action') {
       const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
-      item.command = {
-        command: element.command,
-        title: element.label,
-      };
+      if (element.command) {
+        item.command = {
+          command: element.command,
+          title: element.label,
+        };
+      }
       if (element.icon) {
         item.iconPath = new vscode.ThemeIcon(element.icon);
       }
@@ -86,8 +88,6 @@ export class WorktreeTreeDataProvider implements vscode.TreeDataProvider<TreeNod
     });
 
     if (active) {
-      nodes.push({ type: 'action', label: '', command: '', icon: undefined });
-
       if (active.status === 'created' || active.status === 'committed') {
         nodes.push({
           type: 'action',
@@ -124,10 +124,7 @@ export class WorktreeTreeDataProvider implements vscode.TreeDataProvider<TreeNod
           tooltip: 'Delete this worktree and its branch',
         });
       }
-
-      nodes.push({ type: 'action', label: '', command: '', icon: undefined });
     } else {
-      nodes.push({ type: 'action', label: '', command: '', icon: undefined });
       nodes.push({
         type: 'action',
         label: 'Start Step-by-Step PR',
@@ -135,7 +132,6 @@ export class WorktreeTreeDataProvider implements vscode.TreeDataProvider<TreeNod
         icon: 'repo-create',
         tooltip: 'Create a new worktree and branch, add commits over time',
       });
-      nodes.push({ type: 'action', label: '', command: '', icon: undefined });
     }
 
     for (const info of all) {

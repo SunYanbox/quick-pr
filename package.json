@@ -50,7 +50,7 @@
     "views": {
       "quick-pr-studio-worktrees": [
         {
-          "id": "quick-pr-studio.worktreeList",
+          "id": "quick-pr-studio-worktreeList",
           "name": "Worktrees",
           "icon": "$(git-pull-request)"
         }
