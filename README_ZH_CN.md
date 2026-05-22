@@ -68,6 +68,28 @@
 - **完整调试日志**：AI 完整提示词和原始回复均记录到 `.quick-pr-studio/log.log`，方便排查问题
 - **加载状态提示**：点击按钮后自动禁用并显示进度文字，同时 VS Code 通知区域实时显示当前操作步骤
 
+## 测试
+
+你可以使用专用的沙箱仓库来测试 Quick PR Studio：
+
+- **GitHub**：[github.com/SunYanbox/quick-pr-studio-test-repo](https://github.com/SunYanbox/quick-pr-studio-test-repo)
+
+该仓库极简设计且不含任何业务代码，是 PR 练习的安全场所。它包含：
+
+- **CONTRIBUTING.md** — 可接受的 PR 指南（禁止违禁内容、文件大小限制）
+- **CI 流水线** — 自动检查文件大小（< 100 KB）并扫描违禁内容
+- **CODEOWNERS** — 保护关键文件（LICENSE、README、CONTRIBUTING、.github）
+- **Pre-commit 钩子** — 阻止提交超限文件
+- **Quick PR Studio 配置** — 预置的 `.quick-pr-studio/settings.json`
+
+测试步骤：
+
+1. 克隆测试仓库：`git clone https://github.com/SunYanbox/quick-pr-studio-test-repo.git`
+2. 做任意修改（编辑文件、新增文件等）
+3. 运行 Quick PR Studio 创建一个 Pull Request
+
+任何善意的 PR 都受欢迎，无格式要求。详见 [CONTRIBUTING.md](https://github.com/SunYanbox/quick-pr-studio-test-repo/blob/main/CONTRIBUTING.md)。
+
 ## 配置项
 
 | 设置 | 默认值 | 说明 |
