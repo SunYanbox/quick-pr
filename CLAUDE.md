@@ -21,4 +21,5 @@ VS Code extension for creating GitHub PRs using git worktree workflow.
 - All `id` values in `viewsContainers` and `views` MUST use only `[a-zA-Z0-9_-]` (alphanumeric, underscore, hyphen). Dots are not allowed in these `id` fields. Use hyphens for namespace separation (e.g., `quick-pr-studio-worktrees`).
 - Command identifiers (the `command` field in `contributes.commands`) use dots for namespace separation (e.g., `quick-pr-studio.createPr`).
 - Build with `npm run build` (esbuild). Output goes to `dist/extension.js`.
+- Test sandbox: (GitHub: `github.com/SunYanbox/quick-pr-studio-test-repo`) — a minimal repo for testing PR creation with Quick PR Studio.
 - VS Code engine requirement: `^1.85.0`.

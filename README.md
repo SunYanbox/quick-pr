@@ -68,6 +68,28 @@ Choose between two workflow modes:
 - **Full debug logging**: Complete AI prompts and raw responses are logged to `.quick-pr-studio/log.log` for troubleshooting
 - **Loading indicators**: Buttons disable automatically on click and show progress text; VS Code notifications display real-time progress for each step
 
+## Testing
+
+You can test Quick PR Studio using the dedicated sandbox repository:
+
+- **GitHub**: [github.com/SunYanbox/quick-pr-studio-test-repo](https://github.com/SunYanbox/quick-pr-studio-test-repo)
+
+This repository is intentionally minimal with no application code — it's a safe practice ground for creating Pull Requests. It includes:
+
+- **CONTRIBUTING.md** — Guidelines for acceptable PRs (no prohibited content, file size limits)
+- **CI pipeline** — Automatically checks file sizes (< 100 KB) and scans for prohibited content
+- **CODEOWNERS** — Protects critical files (LICENSE, README, CONTRIBUTING, .github)
+- **Pre-commit hook** — Prevents committing oversized files
+- **Quick PR Studio settings** — Pre-configured `.quick-pr-studio/settings.json`
+
+To test:
+
+1. Clone the test repo: `git clone https://github.com/SunYanbox/quick-pr-studio-test-repo.git`
+2. Make any change (edit a file, add a file, etc.)
+3. Run Quick PR Studio to create a Pull Request
+
+Any well-intentioned PR is welcome — no format requirements. See [CONTRIBUTING.md](https://github.com/SunYanbox/quick-pr-studio-test-repo/blob/main/CONTRIBUTING.md) for details.
+
 ## Configuration
 
 | Setting | Default | Description |
